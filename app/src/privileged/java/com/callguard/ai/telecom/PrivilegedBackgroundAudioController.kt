@@ -1,6 +1,7 @@
 package com.callguard.ai.telecom
 
 import android.telecom.Call
+import androidx.annotation.RequiresApi
 import java.lang.reflect.InvocationTargetException
 
 /**
@@ -12,6 +13,7 @@ import java.lang.reflect.InvocationTargetException
  * A normal third-party APK is not expected to pass this boundary. The caller
  * must be the platform-authorized default dialer/system integration.
  */
+@RequiresApi(30)
 class PrivilegedBackgroundAudioController(private val call: Call) {
     fun enter(): Result<Unit> = runCatching {
         check(call.state == Call.STATE_RINGING || call.state == Call.STATE_ACTIVE) {
