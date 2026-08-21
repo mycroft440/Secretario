@@ -4,6 +4,7 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import androidx.core.content.edit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -61,11 +62,11 @@ object CallRepository {
         }
 
         if (!demoWasSeeded) {
-            prefs.edit().putBoolean(KEY_DEMO_SEEDED, true).apply()
+            prefs.edit { putBoolean(KEY_DEMO_SEEDED, true) }
         }
 
         if (prefs.contains(KEY_CALLS_LEGACY) || (!demoWasSeeded && _calls.value.isNotEmpty())) {
-            if (persist()) prefs.edit().remove(KEY_CALLS_LEGACY).apply()
+            if (persist()) prefs.edit { remove(KEY_CALLS_LEGACY) }
         }
     }
 
@@ -94,7 +95,7 @@ object CallRepository {
     fun clearHistory() {
         _calls.value = emptyList()
         appContext?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            ?.edit()?.putBoolean(KEY_DEMO_SEEDED, true)?.apply()
+            ?.edit { putBoolean(KEY_DEMO_SEEDED, true) }
         persist()
     }
 
@@ -102,7 +103,7 @@ object CallRepository {
     fun resetDemo() {
         _calls.value = seed()
         appContext?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            ?.edit()?.putBoolean(KEY_DEMO_SEEDED, true)?.apply()
+            ?.edit { putBoolean(KEY_DEMO_SEEDED, true) }
         persist()
     }
 
@@ -111,10 +112,9 @@ object CallRepository {
         val raw = serialize(_calls.value)
         return runCatching {
             val encrypted = encrypt(raw)
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .edit()
-                .putString(KEY_CALLS_ENCRYPTED, encrypted)
-                .apply()
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+                putString(KEY_CALLS_ENCRYPTED, encrypted)
+            }
             true
         }.getOrDefault(false)
     }
