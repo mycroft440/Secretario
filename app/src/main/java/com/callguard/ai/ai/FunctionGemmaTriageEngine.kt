@@ -33,9 +33,6 @@ class FunctionGemmaTriageEngine(private val context: Context) : AutoCloseable {
     val isModelInstalled: Boolean
         get() = ModelInstaller.installedMetadata(context) != null
 
-    val isTrustedModelInstalled: Boolean
-        get() = ModelInstaller.installedMetadata(context)?.trusted == true
-
     suspend fun initialize(requireTrusted: Boolean = true): Result<Unit> = withContext(Dispatchers.Default) {
         inferenceMutex.withLock { runCatching { initializeLocked(requireTrusted) } }
     }
@@ -48,12 +45,19 @@ class FunctionGemmaTriageEngine(private val context: Context) : AutoCloseable {
     }
 
     private suspend fun initializeLocked(requireTrusted: Boolean) {
-        val metadata = ModelInstaller.installedMetadata(context)
-            ?: error("Modelo FunctionGemma não instalado ou arquivo fora dos limites aceitos")
-        if (requireTrusted && !metadata.trusted) {
-            error("Modelo local não verificado; uso terminal de produção bloqueado")
-        }
         if (engine != null) return
+
+        val metadata = if (requireTrusted) {
+            ModelInstaller.verifiedTrustedMetadata(context)
+                ?: error("Modelo ausente, corrompido, substituído ou não autorizado para produção")
+        } else {
+            ModelInstaller.installedMetadata(context)
+                ?: error("Modelo FunctionGemma não instalado ou arquivo fora dos limites aceitos")
+        }
+
+        require(metadata.file.canonicalFile == modelFile.canonicalFile) {
+            "Caminho de modelo inesperado"
+        }
 
         modelFile.parentFile?.mkdirs()
         val gpuAttempt = runCatching {
@@ -78,7 +82,7 @@ class FunctionGemmaTriageEngine(private val context: Context) : AutoCloseable {
         requireTrusted = false
     )
 
-    /** Production path: refuses terminal inference unless the model hash is trusted. */
+    /** Production path: re-hashes and refuses inference unless the exact model file is trusted. */
     suspend fun classifyForProduction(transcript: String): TriageResult = classifyInternal(
         transcript = transcript,
         requireTrusted = true
@@ -105,15 +109,25 @@ class FunctionGemmaTriageEngine(private val context: Context) : AutoCloseable {
             }
         }
 
-        if (requireTrusted && !isTrustedModelInstalled) {
-            return pending("O modelo instalado não é uma release CallGuard verificada.")
-        }
-
         return withContext(Dispatchers.Default) {
             inferenceMutex.withLock {
-                if (engine == null) initializeLocked(requireTrusted)
+                if (engine == null) {
+                    val initialization = runCatching { initializeLocked(requireTrusted) }
+                    if (initialization.isFailure) {
+                        return@withLock pending(
+                            if (requireTrusted) {
+                                "O modelo não passou pela verificação de integridade e confiança."
+                            } else {
+                                "O modelo local não pôde ser inicializado."
+                            }
+                        )
+                    }
+                }
 
-                val conversation = engine!!.createConversation(
+                val activeEngine = engine ?: return@withLock pending(
+                    "A IA local não está disponível para esta ligação."
+                )
+                val conversation = activeEngine.createConversation(
                     ConversationConfig(
                         systemInstruction = Contents.of(
                             "Você é o roteador de triagem CallGuard para ligações brasileiras. " +
