@@ -3,6 +3,7 @@ package com.callguard.ai.ai
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import androidx.core.content.edit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -105,17 +106,16 @@ object ModelInstaller {
         val deleted = File(dir, FunctionGemmaTriageEngine.MODEL_FILE).delete()
         File(dir, "${FunctionGemmaTriageEngine.MODEL_FILE}.part").delete()
         File(dir, "${FunctionGemmaTriageEngine.MODEL_FILE}.bak").delete()
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { clear() }
         deleted
     }
 
     private fun saveMetadata(context: Context, info: InstalledModelInfo) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit()
-            .putString(KEY_SHA256, info.sha256)
-            .putLong(KEY_BYTES, info.bytes)
-            .putBoolean(KEY_TRUSTED, info.trusted)
-            .apply()
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+            putString(KEY_SHA256, info.sha256)
+            putLong(KEY_BYTES, info.bytes)
+            putBoolean(KEY_TRUSTED, info.trusted)
+        }
     }
 
     private fun validateDisplayName(context: Context, source: Uri) {
