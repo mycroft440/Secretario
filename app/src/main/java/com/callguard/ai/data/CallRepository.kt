@@ -91,12 +91,25 @@ object CallRepository {
         persist()
     }
 
+    /**
+     * Destructive local erasure. It removes ciphertext and legacy plaintext first,
+     * then deletes the history key. It never depends on encrypting an empty payload.
+     */
     @Synchronized
     fun clearHistory() {
         _calls.value = emptyList()
-        appContext?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            ?.edit { putBoolean(KEY_DEMO_SEEDED, true) }
-        persist()
+        appContext?.let { context ->
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit(commit = true) {
+                remove(KEY_CALLS_ENCRYPTED)
+                remove(KEY_CALLS_LEGACY)
+                putBoolean(KEY_DEMO_SEEDED, true)
+            }
+            runCatching {
+                KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.let { keyStore ->
+                    if (keyStore.containsAlias(KEY_ALIAS)) keyStore.deleteEntry(KEY_ALIAS)
+                }
+            }
+        }
     }
 
     @Synchronized
