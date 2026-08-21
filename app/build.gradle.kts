@@ -27,6 +27,12 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    lint {
+        // compileSdk 37 is used for API compatibility checks, but targetSdk 37
+        // deliberately waits for Android 17 behavior-change testing on hardware.
+        disable += "OldTargetApi"
+    }
+
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
