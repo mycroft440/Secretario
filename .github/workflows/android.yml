@@ -14,9 +14,9 @@ concurrency:
 
 jobs:
   build:
-    name: Test, lint and build APK
+    name: Test, lint and build Android artifacts
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
 
     steps:
       - name: Checkout
@@ -48,16 +48,80 @@ jobs:
         run: gradle --no-daemon :app:testDebugUnitTest --stacktrace
 
       - name: Android lint
-        run: gradle --no-daemon :app:lintDebug --stacktrace
+        run: gradle --no-daemon :app:lintDebug :app:lintRelease --stacktrace
 
       - name: Build debug APK
         run: gradle --no-daemon :app:assembleDebug --stacktrace
 
-      - name: Upload APK
+      - name: Build release APK and AAB
+        run: gradle --no-daemon :app:assembleRelease :app:bundleRelease --stacktrace
+
+      - name: Prepare release artifacts
+        id: release
+        env:
+          CALLGUARD_KEYSTORE_B64: ${{ secrets.CALLGUARD_KEYSTORE_B64 }}
+          CALLGUARD_KEY_ALIAS: ${{ secrets.CALLGUARD_KEY_ALIAS }}
+          CALLGUARD_KEYSTORE_PASSWORD: ${{ secrets.CALLGUARD_KEYSTORE_PASSWORD }}
+          CALLGUARD_KEY_PASSWORD: ${{ secrets.CALLGUARD_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-artifacts
+
+          RELEASE_APK="app/build/outputs/apk/release/app-release-unsigned.apk"
+          RELEASE_AAB="app/build/outputs/bundle/release/app-release.aab"
+          test -f "$RELEASE_APK"
+          test -f "$RELEASE_AAB"
+
+          if [[ -n "${CALLGUARD_KEYSTORE_B64:-}" && -n "${CALLGUARD_KEY_ALIAS:-}" && -n "${CALLGUARD_KEYSTORE_PASSWORD:-}" && -n "${CALLGUARD_KEY_PASSWORD:-}" ]]; then
+            echo "Release signing secrets detected; signing APK and AAB."
+            KEYSTORE="$RUNNER_TEMP/callguard-release.jks"
+            printf '%s' "$CALLGUARD_KEYSTORE_B64" | base64 --decode > "$KEYSTORE"
+
+            SIGNED_APK="release-artifacts/CallGuardAI-v0.1.0-release-signed.apk"
+            SIGNED_AAB="release-artifacts/CallGuardAI-v0.1.0-release-signed.aab"
+
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign \
+              --ks "$KEYSTORE" \
+              --ks-key-alias "$CALLGUARD_KEY_ALIAS" \
+              --ks-pass env:CALLGUARD_KEYSTORE_PASSWORD \
+              --key-pass env:CALLGUARD_KEY_PASSWORD \
+              --out "$SIGNED_APK" \
+              "$RELEASE_APK"
+
+            jarsigner \
+              -keystore "$KEYSTORE" \
+              -storepass "$CALLGUARD_KEYSTORE_PASSWORD" \
+              -keypass "$CALLGUARD_KEY_PASSWORD" \
+              -signedjar "$SIGNED_AAB" \
+              "$RELEASE_AAB" \
+              "$CALLGUARD_KEY_ALIAS"
+
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$SIGNED_APK"
+            jarsigner -verify "$SIGNED_AAB"
+            rm -f "$KEYSTORE"
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No complete release keystore secrets found; publishing clearly marked unsigned artifacts."
+            cp "$RELEASE_APK" "release-artifacts/CallGuardAI-v0.1.0-release-unsigned.apk"
+            cp "$RELEASE_AAB" "release-artifacts/CallGuardAI-v0.1.0-release-unsigned.aab"
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          (cd release-artifacts && sha256sum CallGuardAI-* > SHA256SUMS.txt)
+
+      - name: Upload debug APK
         uses: actions/upload-artifact@v7
         with:
           name: CallGuardAI-debug
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Upload release APK and AAB
+        uses: actions/upload-artifact@v7
+        with:
+          name: CallGuardAI-release
+          path: release-artifacts/
           if-no-files-found: error
 
       - name: Upload test and lint reports
@@ -69,4 +133,6 @@ jobs:
             app/build/reports/tests/
             app/build/reports/lint-results-debug.html
             app/build/reports/lint-results-debug.xml
+            app/build/reports/lint-results-release.html
+            app/build/reports/lint-results-release.xml
           if-no-files-found: ignore
