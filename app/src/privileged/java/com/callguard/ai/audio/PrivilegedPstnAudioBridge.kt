@@ -7,11 +7,11 @@ import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.telecom.Call
+import androidx.annotation.RequiresApi
 import com.callguard.ai.telecom.PrivilegedBackgroundAudioController
 import com.callguard.ai.telecom.PrivilegedCallRegistry
 import java.lang.reflect.InvocationTargetException
@@ -41,9 +41,14 @@ import kotlinx.coroutines.withTimeout
  * methods. It therefore remains absent from the public flavor and fails closed
  * unless every runtime capability is actually granted by the platform.
  */
+@RequiresApi(30)
 class PrivilegedPstnAudioBridge(private val context: Context) : CarrierAudioBridge {
-    private val audioManager = context.getSystemService(AudioManager::class.java)
-    private val roleManager = context.getSystemService(RoleManager::class.java)
+    private val audioManager: AudioManager = requireNotNull(
+        context.getSystemService(AudioManager::class.java)
+    )
+    private val roleManager: RoleManager = requireNotNull(
+        context.getSystemService(RoleManager::class.java)
+    )
 
     override val availability: CarrierAudioBridge.Availability
         get() = if (basicCapabilitiesAvailable()) {
@@ -110,13 +115,12 @@ class PrivilegedPstnAudioBridge(private val context: Context) : CarrierAudioBrid
     }
 
     private fun basicCapabilitiesAvailable(): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
-        if (roleManager?.isRoleHeld(RoleManager.ROLE_DIALER) != true) return false
+        if (!roleManager.isRoleHeld(RoleManager.ROLE_DIALER)) return false
         if (
             context.checkSelfPermission(CALL_AUDIO_INTERCEPTION_PERMISSION) !=
             PackageManager.PERMISSION_GRANTED
         ) return false
-        if (audioManager?.isCallScreeningModeSupported != true) return false
+        if (!audioManager.isCallScreeningModeSupported()) return false
 
         return runCatching {
             AudioManager::class.java.getMethod("isPstnCallAudioInterceptable")
@@ -180,7 +184,9 @@ class PrivilegedPstnAudioBridge(private val context: Context) : CarrierAudioBrid
                                 changedCall.unregisterCallback(callback)
                                 if (continuation.isActive) {
                                     continuation.resumeWithException(
-                                        IllegalStateException("A chamada foi encerrada durante a preparação da triagem.")
+                                        IllegalStateException(
+                                            "A chamada foi encerrada durante a preparação da triagem."
+                                        )
                                     )
                                 }
                             }
