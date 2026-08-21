@@ -45,8 +45,6 @@ object CallRepository {
             prefs.edit().putBoolean(KEY_DEMO_SEEDED, true).apply()
         }
 
-        // Migrates legacy plaintext history and persists the first demo seed in
-        // encrypted form. Legacy content is removed only after encryption succeeds.
         if (prefs.contains(KEY_CALLS_LEGACY) || (!demoWasSeeded && _calls.value.isNotEmpty())) {
             if (persist()) prefs.edit().remove(KEY_CALLS_LEGACY).apply()
         }
@@ -89,7 +87,6 @@ object CallRepository {
         persist()
     }
 
-    /** Returns false instead of crashing the call flow if secure storage fails. */
     private fun persist(): Boolean {
         val context = appContext ?: return false
         val raw = serialize(_calls.value)
@@ -112,7 +109,6 @@ object CallRepository {
             return runCatching { parse(decrypt(encrypted)) }.getOrElse { emptyList() }
         }
 
-        // One-time migration path from the original plaintext MVP format.
         val legacy = prefs.getString(KEY_CALLS_LEGACY, null) ?: return emptyList()
         return runCatching { parse(legacy) }.getOrElse { emptyList() }
     }
@@ -131,6 +127,7 @@ object CallRepository {
                 put("callerName", call.callerName ?: JSONObject.NULL)
                 put("confidence", call.confidence?.toDouble() ?: JSONObject.NULL)
                 put("timestamp", call.timestamp)
+                put("isDemo", call.isDemo)
             })
         }
         return array.toString()
@@ -152,7 +149,8 @@ object CallRepository {
                         summary = obj.optNullableString("summary"),
                         callerName = obj.optNullableString("callerName"),
                         confidence = if (obj.isNull("confidence")) null else obj.optDouble("confidence").toFloat(),
-                        timestamp = obj.optLong("timestamp", System.currentTimeMillis())
+                        timestamp = obj.optLong("timestamp", System.currentTimeMillis()),
+                        isDemo = obj.optBoolean("isDemo", false)
                     )
                 )
             }
@@ -211,7 +209,8 @@ object CallRepository {
                 decision = CallDecision.BLOCKED,
                 category = CallCategory.OPERATOR,
                 summary = "Exemplo: oferta de operadora.",
-                timestamp = now - 120_000L
+                timestamp = now - 120_000L,
+                isDemo = true
             ),
             CallRecord(
                 id = 2,
@@ -223,7 +222,8 @@ object CallRepository {
                 summary = "Exemplo: Roberto informou que trocou de número e precisa falar com você.",
                 callerName = "Roberto",
                 confidence = 0.96f,
-                timestamp = now - 60_000L
+                timestamp = now - 60_000L,
+                isDemo = true
             ),
             CallRecord(
                 id = 3,
@@ -232,7 +232,8 @@ object CallRepository {
                 decision = CallDecision.BLOCKED,
                 category = CallCategory.ROBOT_OR_SILENT,
                 summary = "Exemplo: robô ou chamada sem fala.",
-                timestamp = now
+                timestamp = now,
+                isDemo = true
             )
         )
     }
