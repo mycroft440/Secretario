@@ -21,6 +21,7 @@ Esses números **não fazem parte da política real de bloqueio**.
 - Android `CallScreeningService` e solicitação de `ROLE_CALL_SCREENING`;
 - resposta rápida/conservadora: número desconhecido não é bloqueado sem evidência determinística;
 - compatibilidade do screening a partir do Android 10/API 29, com o sinal de verificação de número usado somente no API 30+;
+- controlador Android 17/API 37 para `STATE_AUDIO_PROCESSING → STATE_SIMULATED_RINGING` em chamadas `PROPERTY_IS_EXTERNAL_CALL` compatíveis;
 - histórico local cifrado com AES-GCM e chave do Android Keystore;
 - app sem permissão `INTERNET`, backup e device-transfer de dados privados desativados;
 - exclusão destrutiva do histórico, ciphertext legado e chave AES pelo usuário;
@@ -33,14 +34,29 @@ Esses números **não fazem parte da política real de bloqueio**.
 - nenhum modelo marcado como autorizado para produção até existir uma release CallGuard avaliada;
 - laboratório para digitar transcrições e testar decisões;
 - dataset seed adversarial + validação em CI;
-- contrato explícito para uma futura ponte PCM bidirecional;
+- contrato explícito para uma ponte PCM bidirecional;
 - debug, release, testes e lint exclusivamente no GitHub Actions.
+
+## Telefonia: melhor rota aplicada
+
+O projeto agora separa **controle do estado da chamada** de **transporte de áudio PCM**.
+
+No Android 17/API 37, `Android17AudioProcessingController` usa a API pública de Telecom para uma `Connection` compatível marcada com `PROPERTY_IS_EXTERNAL_CALL`:
+
+1. `setAudioProcessing(Call.AUDIO_PROCESSING_USE_CASE_CALL_SCREENING)` coloca a chamada em `STATE_AUDIO_PROCESSING`;
+2. a IA pode processar a sessão fornecida pelo dono da chamada externa;
+3. uma chamada aprovada usa `setSimulatedRinging()`, fazendo a transição para `STATE_SIMULATED_RINGING` e apresentando-a ao usuário;
+4. depois da resposta do usuário, o provedor pode marcar a conexão como ativa.
+
+O controlador valida API, propriedade `EXTERNAL_CALL` e ordem dos estados antes de executar qualquer transição. Em Android antigo ou chamada comum, ele retorna falha segura em vez de tentar API escondida.
+
+Essa rota **não transforma uma ligação SIM/PSTN comum em external call** e não cria PCM onde o sistema não o fornece. Ela está pronta para integração OEM/companion/VoIP que seja dona de uma `Connection` externa e do respectivo áudio.
 
 ## Limitação central
 
-O `CallScreeningService` público permite **permitir, silenciar ou rejeitar** uma chamada, mas não entrega a um APK comum o áudio bidirecional PCM da chamada celular da operadora. Também não existe um segundo `respondToCall` para silenciar primeiro e depois reativar o toque da mesma ligação.
+O `CallScreeningService` público permite **permitir, silenciar ou rejeitar** uma chamada SIM/PSTN, mas não entrega a um APK comum o áudio bidirecional PCM da chamada celular da operadora. Também não existe um segundo `respondToCall` para silenciar primeiro e depois reativar o toque da mesma chamada.
 
-Portanto, a experiência final “IA atende em silêncio, conversa 100% offline e só depois faz a chamada celular convencional tocar” precisa de **integração OEM/privilegiada**, rota **VoIP/SIP** controlada pelo app, ou uma futura API do Android. O MVP não finge que essa ponte já existe.
+O Android 17 adiciona o estado `AUDIO_PROCESSING` e o caso de uso `CALL_SCREENING`, mas `Connection.setAudioProcessing()` e `setSimulatedRinging()` são públicos apenas para `PROPERTY_IS_EXTERNAL_CALL`. Portanto, para uma ligação SIM comum ainda precisamos de **integração OEM/privilegiada**; para uma chamada externa controlada por um provedor compatível, o controlador API 37 já está implementado.
 
 ## Voz offline planejada
 
