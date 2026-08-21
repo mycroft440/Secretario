@@ -9,12 +9,16 @@ import com.callguard.ai.data.TriageResult
 class TriageCoordinator(context: Context) : AutoCloseable {
     private val engine = FunctionGemmaTriageEngine(context.applicationContext)
 
+    suspend fun unloadModel() = engine.unload()
+
     suspend fun classifyAndStore(
         phoneNumber: String,
         transcript: String,
         recordId: Long = System.currentTimeMillis()
     ): TriageResult {
-        val result = engine.classify(transcript.trim())
+        val normalizedNumber = phoneNumber.trim().take(40).ifBlank { "Número desconhecido" }
+        val normalizedTranscript = transcript.trim().take(1_500)
+        val result = engine.classify(normalizedTranscript)
         val label = when (result.decision) {
             CallDecision.ALLOWED -> result.callerName?.let { "ligação real • $it" } ?: result.category.displayName()
             CallDecision.BLOCKED -> result.category.displayName()
@@ -23,11 +27,11 @@ class TriageCoordinator(context: Context) : AutoCloseable {
         CallRepository.upsert(
             CallRecord(
                 id = recordId,
-                phoneNumber = phoneNumber.ifBlank { "Número desconhecido" },
+                phoneNumber = normalizedNumber,
                 label = label,
                 decision = result.decision,
                 category = result.category,
-                transcript = transcript.ifBlank { null },
+                transcript = normalizedTranscript.ifBlank { null },
                 summary = result.summary,
                 callerName = result.callerName,
                 confidence = result.confidence
