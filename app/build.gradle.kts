@@ -17,6 +17,21 @@ android {
         versionName = "0.1.0"
     }
 
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("public") {
+            dimension = "distribution"
+            buildConfigField("boolean", "PRIVILEGED_PSTN_AUDIO", "false")
+        }
+        create("privileged") {
+            dimension = "distribution"
+            // Keep the OEM/system experiment separate from the Play-safe package.
+            applicationIdSuffix = ".privileged"
+            versionNameSuffix = "-privileged"
+            buildConfigField("boolean", "PRIVILEGED_PSTN_AUDIO", "true")
+        }
+    }
+
     buildFeatures {
         compose = true
         buildConfig = true
