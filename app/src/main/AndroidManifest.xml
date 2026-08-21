@@ -1,15 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Deliberately no INTERNET permission: inference, history and model use are local-only. -->
     <application
         android:name=".CallGuardApplication"
-        android:allowBackup="true"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
         android:label="CallGuard AI"
         android:supportsRtl="true"
         android:theme="@style/Theme.CallGuardAI">
 
-        <!-- Required by LiteRT-LM GPU backend when available. -->
+        <!-- Optional native libraries used by LiteRT-LM GPU backends. -->
         <uses-native-library android:name="libvndksupport.so" android:required="false" />
         <uses-native-library android:name="libOpenCL.so" android:required="false" />
 
