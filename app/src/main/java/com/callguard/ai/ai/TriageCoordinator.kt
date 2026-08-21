@@ -43,6 +43,7 @@ class TriageCoordinator(context: Context) : AutoCloseable {
     private fun com.callguard.ai.data.CallCategory.displayName(): String = when (this) {
         com.callguard.ai.data.CallCategory.OPERATOR -> "operadora/telemarketing"
         com.callguard.ai.data.CallCategory.MARKETING -> "marketing"
+        com.callguard.ai.data.CallCategory.SCAM -> "possível golpe/fraude"
         com.callguard.ai.data.CallCategory.ROBOT_OR_SILENT -> "robô/ligação muda"
         com.callguard.ai.data.CallCategory.DELIVERY -> "entrega"
         com.callguard.ai.data.CallCategory.JOB -> "emprego"
