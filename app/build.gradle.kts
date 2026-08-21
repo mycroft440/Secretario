@@ -10,6 +10,8 @@ android {
     defaultConfig {
         applicationId = "com.callguard.ai"
         minSdk = 29
+        // Android 17 targeting remains intentionally deferred until the app and
+        // LiteRT-LM native path are exercised on Android 17 behavior changes.
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
@@ -43,9 +45,7 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
 
     // Official Google AI Edge runtime for on-device FunctionGemma / .litertlm models.
-    // Keep 0.14.0 pinned until our manual tool-call integration is validated against
-    // a newer runtime on real Android hardware.
-    implementation("com.google.ai.edge.litertlm:litertlm-android:0.14.0")
-    // LiteRT-LM 0.14.0 expects coroutines 1.11.x at runtime; pin it explicitly.
+    // Keep this pinned for reproducible builds; upgrades are validated by CI before merge.
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.16.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 }
