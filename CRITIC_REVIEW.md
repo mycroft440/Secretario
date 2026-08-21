@@ -21,16 +21,16 @@ A separação é de função e checklist dentro deste trabalho; não existe um p
 
 | Área | Estado do Crítico | Principais achados/correções |
 |---|---|---|
-| 1. Build / CI / dependências | **APROVADO NO RUN #107; REGRESSÃO FINAL PENDENTE** | SDK Android 17 corrigido para `platforms;android-37.0`; Actions Node 24; Gradle 9.5; JDK 21 para LiteRT-LM/testes; código do app continua Java 17. |
-| 2. FunctionGemma / runtime | **APROVADO NO RUN #107; REGRESSÃO FINAL PENDENTE** | Automatic tool calling removido; tool calls manuais; categoria/confiança/cardinalidade validadas; NaN/infinito rejeitados; LiteRT-LM 0.16.1; falha de modelo vira `PENDING`. |
+| 1. Build / CI / dependências | **APROVADO** | SDK Android 17 usa `platforms;android-37.0`; Actions Node 24; Gradle 9.5; JDK 21 para LiteRT-LM/testes; código do app continua Java 17. |
+| 2. FunctionGemma / runtime | **APROVADO** | Automatic tool calling removido; tool calls manuais; categoria/confiança/cardinalidade validadas; NaN/infinito rejeitados; LiteRT-LM 0.16.1; falha de modelo vira `PENDING`. |
 | 3. Telefonia Android | **APROVADO COM LIMITAÇÃO DE PLATAFORMA** | Números DEMO removidos das regras reais; screening conservador; resposta antes de I/O; API 29 protegida do `callerNumberVerificationStatus` de API 30; áudio bidirecional da operadora continua indisponível para APK público. |
-| 4. Privacidade / armazenamento | **APROVADO NO RUN #107; REGRESSÃO FINAL PENDENTE** | Sem `INTERNET`; backup e device-transfer desativados; AES-GCM/Keystore; exclusão remove ciphertext, legado e chave; I/O/Keystore fora do caminho crítico do screening. |
+| 4. Privacidade / armazenamento | **APROVADO** | Sem `INTERNET`; backup e device-transfer desativados; AES-GCM/Keystore; exclusão remove ciphertext, legado e chave; I/O/Keystore fora do caminho crítico do screening. |
 | 5. Dataset / avaliação | **APROVADO COMO BASE DE DESENVOLVIMENTO** | Seed com 56 casos adversariais; vazio não significa silêncio; SCAM explícito; validador rejeita combinações perigosas; gates de produção e `test_locked` definidos. |
-| 6. UI / UX / acessibilidade | **PENDENTE CI APÓS CORREÇÃO DE COPY** | Registros fictícios marcados DEMO; modelo não verificado sinalizado; ícone presente. A auditoria do APK #107 revelou que “APK permanece leve” era promessa não sustentada; a UI agora diz apenas que o modelo é importado separadamente. |
-| 7. Testes / falhas | **APROVADO NO RUN #107; REGRESSÃO FINAL PENDENTE** | 15 testes passaram, 0 falhas e 0 ignorados; regressões cobrem categorias incoerentes, baixa confiança, tool desconhecida, sanitização e confiança não finita. |
-| 8. Modelo / distribuição / integridade | **PENDENTE CI APÓS CORREÇÃO DE DOCUMENTAÇÃO** | Instalação atômica, limite de tamanho, SHA-256 e allowlist; produção recalcula hash. O APK debug universal #107 ficou ~107 MiB; documentação agora registra custo do LiteRT-LM e exige App Bundle/ABI splits/R8 + medição antes de prometer tamanho final. |
+| 6. UI / UX / acessibilidade | **APROVADO EM ESTRUTURA** | Registros fictícios marcados DEMO; modelo não verificado sinalizado; ícone presente; removida a promessa não sustentada de “APK permanece leve”. |
+| 7. Testes / falhas | **APROVADO** | 15 testes passaram, 0 falhas e 0 ignorados; regressões cobrem categorias incoerentes, baixa confiança, tool desconhecida, sanitização e confiança não finita. |
+| 8. Modelo / distribuição / integridade | **APROVADO PARA O MVP** | Instalação atômica, limite de tamanho, SHA-256 e allowlist; produção recalcula hash. O APK debug universal ~107 MiB está documentado; App Bundle/ABI splits/R8 + medição permanecem gates de release, não promessas do MVP. |
 | 9. Áudio / STT / TTS / VAD | **APROVADO NO DESENHO, BLOQUEADO PELA PLATAFORMA** | Ponte exige PCM entrada/saída, `connectToUser()` e `terminate()`; candidatos VAD/STT/TTS documentados; nenhuma implementação pública finge possuir áudio da chamada da operadora. |
-| 10. Documentação / escopo / release | **PENDENTE CI APÓS ÚLTIMA CORREÇÃO** | README/PLAN/PRIVACY/THIRD_PARTY distinguem MVP, laboratório e produto final; limitações, licenças, LGPD e requisitos de release estão explícitos; tamanho do pacote passou a ser documentado de forma mensurável. |
+| 10. Documentação / escopo / release | **APROVADO** | README/PLAN/PRIVACY/THIRD_PARTY distinguem MVP, laboratório e produto final; limitações, licenças, LGPD, tamanho do pacote e requisitos de release estão explícitos. |
 
 ## Evidência de CI acumulada
 
@@ -38,10 +38,24 @@ A separação é de função e checklist dentro deste trabalho; não existe um p
 - **Run #69:** SDK corrigido, avançou até Kotlin; revelou import ausente de `setContent`.
 - **Run #73:** compilação Kotlin completa; revelou que LiteRT-LM requer Java 21 nos testes.
 - **Run #75:** JDK 21 resolveu o runtime; **testes unitários passaram**; lint então revelou incompatibilidade API 29/API 30 e avisos de manifesto/dependência/estilo.
-- **Run #107:** **dataset, 15 testes, lint, montagem do APK, upload do APK e upload dos relatórios passaram**. O relatório de lint teve **0 issues**. A auditoria posterior do artifact encontrou um problema de promessa de produto: APK debug universal ~107 MiB, incompatível com a frase “APK permanece leve”. A frase foi removida e a estratégia de otimização/medição de release foi documentada; isso exige um último run de regressão.
+- **Run #107:** dataset, 15 testes, lint, montagem do APK e artifacts passaram; lint teve 0 issues. A auditoria posterior do artifact encontrou a promessa incorreta de APK “leve”, removida em seguida.
+- **Run #115:** executou novamente o commit com a última correção de UI/documentação e terminou **100% verde**: SDK, dataset, 15 testes, Android lint, `assembleDebug`, upload do APK e upload dos relatórios passaram.
+
+## Limitações que permanecem conscientemente
+
+A aprovação do Crítico é para o **MVP que o repositório realmente implementa**, não para a experiência final de atendimento autônomo de chamadas celulares. Permanecem como etapas externas/futuras já documentadas:
+
+- falta de API pública Android para áudio PCM bidirecional da chamada celular da operadora;
+- ausência de fine-tune CallGuard aprovado e, portanto, allowlist de modelo ainda vazia;
+- VAD/STT/TTS ainda precisam de benchmark e integração quando existir uma ponte de áudio;
+- target Android 17 deve ser promovido após testes das mudanças de comportamento;
+- distribuição final precisa de App Bundle/ABI splits/R8, medição de tamanho e testes em dispositivos reais;
+- bloqueio por IA em produção exige `test_locked`, red-team e metas de falso bloqueio já definidas.
+
+Esses itens não são apresentados como funcionalidades concluídas e, por isso, não constituem defeitos ocultados do MVP atual.
 
 ## Critério global
 
-A revisão só termina como **SATISFEITA** quando o commit final da branch passar validação de dataset, testes unitários, Android lint, montagem do APK e upload do artefato no GitHub Actions. As limitações restantes devem ser somente fronteiras reais da plataforma ou etapas futuras explicitamente fora do MVP, nunca defeitos ou promessas não sustentadas.
+O critério global foi atendido pelo run #115: o commit com a última mudança funcional/copy passou validação de dataset, testes unitários, Android lint, montagem do APK e upload dos artifacts. Todas as áreas corrigíveis encontradas pelo Crítico foram tratadas; o que resta são limitações reais de plataforma ou gates futuros explicitamente fora do MVP.
 
-**Estado global atual: PENDENTE DO CI FINAL APÓS A CORREÇÃO DA ÚLTIMA PROMESSA NÃO SUSTENTADA.**
+**Estado global: SATISFEITA.**
