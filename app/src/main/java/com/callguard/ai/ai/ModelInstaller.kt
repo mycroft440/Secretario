@@ -17,8 +17,9 @@ data class InstalledModelInfo(
 )
 
 object ModelInstaller {
-    private const val MIN_MODEL_BYTES = 50L * 1024L * 1024L
-    private const val MAX_MODEL_BYTES = 1_500L * 1024L * 1024L
+    const val MIN_MODEL_BYTES = 50L * 1024L * 1024L
+    const val MAX_MODEL_BYTES = 1_500L * 1024L * 1024L
+
     private const val PREFS = "callguard_model_metadata"
     private const val KEY_SHA256 = "sha256"
     private const val KEY_BYTES = "bytes"
@@ -81,7 +82,7 @@ object ModelInstaller {
 
     fun installedMetadata(context: Context): InstalledModelInfo? {
         val file = File(context.filesDir, "models/${FunctionGemmaTriageEngine.MODEL_FILE}")
-        if (!file.exists() || file.length() < MIN_MODEL_BYTES) return null
+        if (!file.exists() || file.length() !in MIN_MODEL_BYTES..MAX_MODEL_BYTES) return null
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val sha = prefs.getString(KEY_SHA256, null) ?: return InstalledModelInfo(
             file = file,
@@ -95,8 +96,6 @@ object ModelInstaller {
             file = file,
             bytes = bytes,
             sha256 = sha,
-            // Trust is re-evaluated against the compiled allowlist so stale prefs
-            // cannot turn an untrusted hash into a trusted release.
             trusted = storedTrusted && ModelTrust.isTrusted(sha)
         )
     }
