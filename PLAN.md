@@ -33,14 +33,15 @@ Implementado:
 - `ROLE_CALL_SCREENING`;
 - resposta conservadora dentro da janela do Android;
 - **nenhum número demo é usado como regra real**;
-- falha de verificação da operadora é sinal de risco, não prova de spam;
+- falha de verificação da operadora é sinal de risco, não prova de spam, e só é consultada no API 30+;
 - histórico local cifrado com AES-GCM e chave Android Keystore;
-- sem permissão `INTERNET` e sem backup do app;
-- exclusão explícita do histórico;
+- sem permissão `INTERNET`, sem cloud backup e sem device-transfer dos dados privados;
+- exclusão explícita e destrutiva do histórico, ciphertext legado e chave AES;
 - FunctionGemma via LiteRT-LM, modelo fora do APK;
-- tool calling **manual**, evitando continuação automática do runtime e permitindo validação antes de qualquer ação;
-- política determinística que valida categoria e confiança;
+- tool calling **manual**, permitindo validação antes de qualquer ação;
+- política determinística que valida categoria, confiança finita e cardinalidade;
 - modelo importado de forma atômica, com SHA-256 e estado de confiança;
+- SHA-256 recalculado do arquivo real antes de qualquer carregamento de produção;
 - nenhum hash marcado como confiável até existir uma release CallGuard avaliada;
 - laboratório de transcrição;
 - exemplos solicitados claramente marcados `DEMO`;
@@ -93,9 +94,9 @@ O modelo **não executa telefonia**. Ele só propõe uma ferramenta.
 - `blockCall`: `OPERATOR`, `MARKETING`, `SCAM`, `ROBOT_OR_SILENT`; confiança mínima do validador: 0,90.
 - `askForClarification`: opção preferida em qualquer ambiguidade.
 
-Categoria incompatível, confiança ausente/baixa, ferramenta desconhecida ou múltiplas tool calls viram `PENDING`.
+Categoria incompatível, confiança ausente/baixa/não finita, ferramenta desconhecida ou múltiplas tool calls viram `PENDING`.
 
-A confiança emitida pelo LLM não é tratada como probabilidade calibrada. Os limiares atuais são guardrails de desenvolvimento e deverão ser calibrados no conjunto de teste bloqueado.
+A confiança emitida pelo LLM não é tratada como probabilidade calibrada. Os limiares atuais são guardrails de desenvolvimento e deverão ser calibrados no conjunto de teste bloqueado. A decisão de telefonia final deverá combinar a classificação com evidências do VAD/STT e a política determinística da sessão, e não tratar a autoconfiança do LLM como probabilidade real.
 
 ## Segurança contra conteúdo adversarial
 
@@ -113,6 +114,8 @@ A instalação:
 - preserva o modelo anterior até a troca terminar;
 - calcula SHA-256;
 - registra se o hash pertence à allowlist compilada.
+
+O metadado salvo **não autoriza produção sozinho**. Antes de inicializar um modelo em modo de produção, o app recalcula o SHA-256 do arquivo exato que será executado e exige que ele corresponda à allowlist. Arquivo corrompido, substituído ou sem hash confiável resulta em `PENDING`.
 
 A allowlist está vazia até produzirmos um modelo oficial. Uma release de produção deverá publicar manifesto com versão, hash, tamanho, runtime testado e métricas do conjunto `test_locked`.
 
@@ -134,8 +137,8 @@ Antes de ativar bloqueio por IA:
 - aplicativo sem `INTERNET`;
 - inferência local;
 - histórico cifrado por AES-GCM com chave no Android Keystore;
-- backup Android desativado;
-- usuário pode apagar o histórico;
+- backup Android e transferência automática de dados privados desativados;
+- usuário pode apagar o ciphertext e a chave do histórico;
 - dados reais para treino somente com opt-in e anonimização;
 - transcrições não entram em logs/telemetria de rede.
 
@@ -146,8 +149,8 @@ Antes de ativar bloqueio por IA:
 - [x] UI Compose e exemplos solicitados com selo DEMO;
 - [x] screening role e serviço;
 - [x] política de screening conservadora;
-- [x] histórico cifrado e exclusão;
-- [x] importação atômica de `.litertlm` e SHA-256;
+- [x] histórico cifrado e exclusão destrutiva;
+- [x] importação atômica de `.litertlm`, SHA-256 e revalidação de integridade em produção;
 - [x] FunctionGemma com tool calling manual;
 - [x] guardrails determinísticos e testes unitários;
 - [x] fallback GPU → CPU;
