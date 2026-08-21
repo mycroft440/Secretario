@@ -11,9 +11,8 @@ import com.callguard.ai.data.CallRepository
 /**
  * Public Android call-screening hook.
  *
- * Android requires the incoming-call response within five seconds. FunctionGemma
- * is deliberately kept out of this callback. Unknown calls are not blocked until
- * a deterministic rule or a supported audio-assisted triage path can justify it.
+ * Android requires the incoming-call response within five seconds. FunctionGemma,
+ * Keystore access and history I/O are deliberately kept out of the critical path.
  */
 class CallGuardScreeningService : CallScreeningService() {
     override fun onScreenCall(callDetails: Call.Details) {
@@ -25,7 +24,6 @@ class CallGuardScreeningService : CallScreeningService() {
             verificationFailed = callDetails.callerNumberVerificationStatus == Connection.VERIFICATION_STATUS_FAILED
         )
 
-        // Respond first; persistence below must never consume the platform timeout.
         val response = CallResponse.Builder()
             .setDisallowCall(policy.block)
             .setRejectCall(policy.block)
@@ -33,6 +31,8 @@ class CallGuardScreeningService : CallScreeningService() {
             .setSkipNotification(false)
             .setSkipCallLog(false)
             .build()
+
+        // Platform response is always first. Everything below is best-effort history.
         respondToCall(callDetails, response)
 
         val record = CallRecord(
@@ -49,6 +49,6 @@ class CallGuardScreeningService : CallScreeningService() {
                 "Ligação desconhecida permitida: a triagem silenciosa completa ainda não possui ponte de áudio suportada."
             }
         )
-        CallRepository.add(record)
+        CallRepository.addAsync(applicationContext, record)
     }
 }
