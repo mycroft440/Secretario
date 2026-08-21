@@ -38,6 +38,13 @@ class FunctionGemmaTriageEngine(private val context: Context) : AutoCloseable {
         inferenceMutex.withLock { runCatching { initializeLocked() } }
     }
 
+    suspend fun unload() = withContext(Dispatchers.Default) {
+        inferenceMutex.withLock {
+            engine?.close()
+            engine = null
+        }
+    }
+
     private suspend fun initializeLocked() {
         if (!isModelInstalled) error("Modelo FunctionGemma não instalado")
         if (engine != null) return
@@ -66,9 +73,6 @@ class FunctionGemmaTriageEngine(private val context: Context) : AutoCloseable {
             .trim()
             .take(MAX_TRANSCRIPT_CHARS)
 
-        // Development-only deterministic fallback. It lets the UI/history be
-        // tested before a fine-tuned model is installed and is visibly labeled
-        // as demo in the app.
         if (!isModelInstalled) return demoFallback(cleanTranscript)
 
         return withContext(Dispatchers.Default) {
@@ -86,8 +90,6 @@ class FunctionGemmaTriageEngine(private val context: Context) : AutoCloseable {
                                 "caso contrário use askForClarification. Não escreva resposta fora da ferramenta."
                         ),
                         tools = listOf(tool(tools)),
-                        // Manual tool calling is intentional. The app validates the proposed
-                        // action and avoids the native automatic continuation path.
                         automaticToolCalling = false,
                         samplerConfig = SamplerConfig(topK = 1, topP = 1.0, temperature = 0.0)
                     )
@@ -97,8 +99,11 @@ class FunctionGemmaTriageEngine(private val context: Context) : AutoCloseable {
                     val response = it.sendMessage(
                         "<transcricao_nao_confiavel>$cleanTranscript</transcricao_nao_confiavel>"
                     )
-                    if (response.toolCalls.size != 1) {
-                        return@withLock pending(
+                    if (response.toolCalls.size == 1) {
+                        val call = response.toolCalls.single()
+                        tools.resolveManualCall(call.name, call.arguments)
+                    } else {
+                        pending(
                             if (response.toolCalls.isEmpty()) {
                                 "O modelo não produziu uma decisão estruturada."
                             } else {
@@ -106,8 +111,6 @@ class FunctionGemmaTriageEngine(private val context: Context) : AutoCloseable {
                             }
                         )
                     }
-                    val call = response.toolCalls.single()
-                    tools.resolveManualCall(call.name, call.arguments)
                 }
             }
         }
