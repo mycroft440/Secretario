@@ -11,9 +11,9 @@ import com.callguard.ai.data.CallRepository
 /**
  * Public Android call-screening hook.
  *
- * The platform requires a response within 5 seconds. FunctionGemma is therefore
- * deliberately kept OUT of this callback. The AI consumes a transcript later,
- * once a supported audio bridge exists (OEM/privileged or VoIP/SIP path).
+ * Android requires the incoming-call response within five seconds. FunctionGemma
+ * is deliberately kept out of this callback. Unknown calls are not blocked until
+ * a deterministic rule or a supported audio-assisted triage path can justify it.
  */
 class CallGuardScreeningService : CallScreeningService() {
     override fun onScreenCall(callDetails: Call.Details) {
@@ -25,9 +25,7 @@ class CallGuardScreeningService : CallScreeningService() {
             verificationFailed = callDetails.callerNumberVerificationStatus == Connection.VERIFICATION_STATUS_FAILED
         )
 
-        // Important: a public CallScreeningService cannot silence now and later
-        // re-enable ringing for the SAME call. Therefore non-blocked calls are
-        // allowed to ring normally until the future audio bridge is implemented.
+        // Respond first; persistence below must never consume the platform timeout.
         val response = CallResponse.Builder()
             .setDisallowCall(policy.block)
             .setRejectCall(policy.block)
@@ -35,32 +33,22 @@ class CallGuardScreeningService : CallScreeningService() {
             .setSkipNotification(false)
             .setSkipCallLog(false)
             .build()
-
         respondToCall(callDetails, response)
 
-        val record = if (policy.block) {
-            CallRecord(
-                id = System.currentTimeMillis(),
-                phoneNumber = number.ifBlank { "Número oculto" },
-                label = policy.reason,
-                decision = CallDecision.BLOCKED,
-                category = when (policy.reason) {
-                    "operadora" -> CallCategory.OPERATOR
-                    "robô/ligação muda" -> CallCategory.ROBOT_OR_SILENT
-                    else -> CallCategory.UNKNOWN
-                },
-                summary = "Bloqueio local realizado antes do toque."
-            )
-        } else {
-            CallRecord(
-                id = System.currentTimeMillis(),
-                phoneNumber = number.ifBlank { "Número oculto" },
-                label = "número desconhecido",
-                decision = CallDecision.PENDING,
-                category = CallCategory.UNKNOWN,
-                summary = "Aguardando uma ponte de áudio compatível para triagem silenciosa por IA."
-            )
-        }
+        val record = CallRecord(
+            id = callDetails.creationTimeMillis.takeIf { it > 0L } ?: System.currentTimeMillis(),
+            phoneNumber = number.ifBlank { "Número indisponível" },
+            label = policy.reason,
+            decision = if (policy.block) CallDecision.BLOCKED else CallDecision.PENDING,
+            category = CallCategory.UNKNOWN,
+            summary = if (policy.block) {
+                "Bloqueio local determinístico realizado antes do toque."
+            } else if (policy.suspicious) {
+                "Sinal de risco da operadora registrado; a ligação não foi bloqueada sem evidência suficiente."
+            } else {
+                "Ligação desconhecida permitida: a triagem silenciosa completa ainda não possui ponte de áudio suportada."
+            }
+        )
         CallRepository.add(record)
     }
 }
