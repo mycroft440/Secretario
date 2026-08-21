@@ -38,11 +38,8 @@ class Android17AudioProcessingController private constructor(
     /** Mark the call active after the user answers through the owning provider. */
     fun markActive(): Result<Unit> = runCatching {
         requireExternalCall()
-        check(
-            connection.state == Connection.STATE_SIMULATED_RINGING ||
-                connection.state == Connection.STATE_AUDIO_PROCESSING
-        ) {
-            "A chamada não está em um estado válido para ser entregue ao usuário."
+        check(connection.state == Connection.STATE_SIMULATED_RINGING) {
+            "A chamada precisa estar em STATE_SIMULATED_RINGING antes de ser marcada como ativa."
         }
         connection.setActive()
     }
@@ -61,16 +58,22 @@ class Android17AudioProcessingController private constructor(
          * 37-only methods on older devices.
          */
         fun create(connection: Connection): Result<Android17AudioProcessingController> {
-            if (
-                !AudioProcessingEligibility.canUseExternalCallAudioProcessing(
-                    sdkInt = Build.VERSION.SDK_INT,
-                    isExternalCall = connection.connectionProperties and
-                        Connection.PROPERTY_IS_EXTERNAL_CALL != 0
-                )
-            ) {
+            // Keep the platform guard explicit so Android Lint can prove that
+            // API 37-only symbols below are unreachable on Android 10–16.
+            if (Build.VERSION.SDK_INT < AudioProcessingEligibility.MIN_API_LEVEL) {
                 return Result.failure(
                     UnsupportedOperationException(
-                        "Audio Processing público requer Android 17/API 37 e uma chamada externa compatível."
+                        "Audio Processing público requer Android 17/API 37."
+                    )
+                )
+            }
+
+            val isExternalCall =
+                connection.connectionProperties and Connection.PROPERTY_IS_EXTERNAL_CALL != 0
+            if (!AudioProcessingEligibility.canUseExternalCallAudioProcessing(37, isExternalCall)) {
+                return Result.failure(
+                    UnsupportedOperationException(
+                        "Audio Processing público exige uma chamada PROPERTY_IS_EXTERNAL_CALL."
                     )
                 )
             }
