@@ -5,7 +5,9 @@
     <application
         android:name=".CallGuardApplication"
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="false"
+        android:icon="@drawable/ic_callguard"
         android:label="CallGuard AI"
         android:supportsRtl="true"
         android:theme="@style/Theme.CallGuardAI">
