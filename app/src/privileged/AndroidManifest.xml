@@ -1,17 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!--
       OEM/system-only distribution. Declaring CALL_AUDIO_INTERCEPTION does not
       grant it to a normal APK; the platform/OEM must grant the SystemApi
-      permission according to its signing/privapp policy.
+      permission according to its signing/privapp policy. ProtectedPermissions
+      is suppressed only on this OEM manifest because requesting it is the
+      explicit purpose of this non-public flavor.
     -->
-    <uses-permission android:name="android.permission.CALL_AUDIO_INTERCEPTION" />
+    <uses-permission
+        android:name="android.permission.CALL_AUDIO_INTERCEPTION"
+        tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+
+    <!-- The privileged PSTN build is intentionally restricted to telephony devices. -->
+    <uses-feature
+        android:name="android.hardware.telephony"
+        android:required="true" />
 
     <application>
         <activity
