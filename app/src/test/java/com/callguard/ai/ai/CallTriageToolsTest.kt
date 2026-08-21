@@ -62,6 +62,18 @@ class CallTriageToolsTest {
     }
 
     @Test
+    fun `non finite confidence never becomes terminal`() {
+        listOf(Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY).forEach { value ->
+            val result = tools.resolveManualCall(
+                "blockCall",
+                mapOf("category" to "SCAM", "reason" to "valor inválido", "confidence" to value)
+            )
+            assertEquals(CallDecision.PENDING, result.decision)
+            assertTrue(result.askAgain)
+        }
+    }
+
+    @Test
     fun `high confidence robot can be blocked`() {
         val result = tools.resolveManualCall(
             "blockCall",
