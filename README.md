@@ -1,6 +1,6 @@
 # CallGuard AI
 
-MVP Android de triagem local de chamadas com FunctionGemma 270M. A revisão formal **Crítico → Executor** foi concluída com estado global **SATISFEITA**; veja [`CRITIC_REVIEW.md`](CRITIC_REVIEW.md).
+MVP Android de triagem local de chamadas com FunctionGemma 270M. A revisão formal **Crítico → Executor** foi concluída; veja [`CRITIC_REVIEW.md`](CRITIC_REVIEW.md).
 
 ## Interface de demonstração solicitada
 
@@ -34,7 +34,7 @@ Esses números **não fazem parte da política real de bloqueio**.
 - laboratório para digitar transcrições e testar decisões;
 - dataset seed adversarial + validação em CI;
 - contrato explícito para uma futura ponte PCM bidirecional;
-- testes, lint e APK exclusivamente no GitHub Actions.
+- debug, release, testes e lint exclusivamente no GitHub Actions.
 
 ## Limitação central
 
@@ -67,34 +67,55 @@ O modelo FunctionGemma fica fora do APK, mas isso **não significa que o APK sej
 
 A inspeção desse artifact mostrou aproximadamente **45 MiB** em bibliotecas nativas para `arm64-v8a` + `x86_64` e cerca de **61 MiB** em DEX/dependências. Esses números são de um APK debug universal e não representam ainda um pacote final otimizado.
 
-Antes de release, o tamanho deverá ser medido novamente usando **Android App Bundle/ABI splits**, shrink/minificação com **R8** quando compatível com o LiteRT-LM e medição do download/instalação por arquitetura. O projeto não promete um tamanho final até essa medição existir.
+Para distribuição menor, continuam como gates: **Android App Bundle/ABI splits**, shrink/minificação com **R8** quando compatível com o LiteRT-LM e medição do download/instalação por arquitetura. O projeto não promete um tamanho final até essa medição existir.
 
 ## Build — somente GitHub Actions
 
 **Não compilar localmente.**
 
-A branch revisada usa:
+A branch usa:
 
 - Android Gradle Plugin 9.3.1;
 - Gradle 9.5.0;
-- JDK 21 para executar Gradle/testes, exigido pelo bytecode atual do LiteRT-LM;
-- bytecode do código do app mantido em Java 17 (`sourceCompatibility`/`targetCompatibility`);
+- JDK 21 para executar Gradle/testes;
+- bytecode do código do app mantido em Java 17;
 - compile SDK 37;
-- target SDK 36, mantido deliberadamente até teste das mudanças de comportamento do Android 17 em hardware/emulador;
+- target SDK 36;
 - Compose BOM `2026.08.00`;
 - LiteRT-LM Android `0.16.1` fixado;
 - coroutines `1.11.0` fixado.
 
-O workflow:
+O workflow agora:
 
 1. instala SDK/API 37 (`platforms;android-37.0`);
 2. valida o dataset seed;
 3. executa testes unitários;
-4. executa Android lint;
+4. executa `lintDebug` e `lintRelease`;
 5. gera o APK debug;
-6. publica APK e relatórios como artifacts.
+6. gera **APK release** com `assembleRelease`;
+7. gera **AAB release** com `bundleRelease`;
+8. publica `CallGuardAI-debug`, `CallGuardAI-release` e relatórios.
 
-A última mudança funcional/copy foi validada pelo **run #115**, com dataset, 15 testes, lint, APK e uploads verdes.
+### Assinatura da release
+
+A CI aceita quatro GitHub Secrets para assinar automaticamente APK e AAB:
+
+- `CALLGUARD_KEYSTORE_B64`;
+- `CALLGUARD_KEY_ALIAS`;
+- `CALLGUARD_KEYSTORE_PASSWORD`;
+- `CALLGUARD_KEY_PASSWORD`.
+
+Com os quatro configurados, o artifact `CallGuardAI-release` contém:
+
+- `CallGuardAI-v0.1.0-release-signed.apk`;
+- `CallGuardAI-v0.1.0-release-signed.aab`.
+
+Sem keystore completa, o Actions publica explicitamente os arquivos como **unsigned**, sem fingir que são release assinada:
+
+- `CallGuardAI-v0.1.0-release-unsigned.apk`;
+- `CallGuardAI-v0.1.0-release-unsigned.aab`.
+
+O artifact também contém `SHA256SUMS.txt`.
 
 ## Próximos passos
 
