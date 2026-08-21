@@ -1,6 +1,6 @@
 # CallGuard AI
 
-MVP Android de triagem local de chamadas com FunctionGemma 270M. O projeto está passando por revisão formal **Crítico → Executor**; veja [`CRITIC_REVIEW.md`](CRITIC_REVIEW.md).
+MVP Android de triagem local de chamadas com FunctionGemma 270M. A revisão formal **Crítico → Executor** foi concluída com estado global **SATISFEITA**; veja [`CRITIC_REVIEW.md`](CRITIC_REVIEW.md).
 
 ## Interface de demonstração solicitada
 
@@ -93,6 +93,8 @@ O workflow:
 4. executa Android lint;
 5. gera o APK debug;
 6. publica APK e relatórios como artifacts.
+
+A última mudança funcional/copy foi validada pelo **run #115**, com dataset, 15 testes, lint, APK e uploads verdes.
 
 ## Próximos passos
 
