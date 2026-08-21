@@ -47,7 +47,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.callguard.ai.ai.FunctionGemmaTriageEngine
+import com.callguard.ai.ai.InstalledModelInfo
 import com.callguard.ai.ai.ModelInstaller
 import com.callguard.ai.ai.TriageCoordinator
 import com.callguard.ai.data.CallDecision
@@ -82,12 +82,7 @@ private fun Dashboard() {
     val coordinator = remember { TriageCoordinator(context) }
     DisposableEffect(Unit) { onDispose { coordinator.close() } }
 
-    fun modelExists(): Boolean {
-        val file = FunctionGemmaTriageEngine(context).modelFile
-        return file.exists() && file.length() > 1_000_000L
-    }
-
-    var modelInstalled by remember { mutableStateOf(modelExists()) }
+    var modelInfo by remember { mutableStateOf(ModelInstaller.installedMetadata(context)) }
     var modelMessage by remember { mutableStateOf<String?>(null) }
     var demoNumber by remember { mutableStateOf("11999999999") }
     var demoTranscript by remember { mutableStateOf("preciso falar com você troquei de número sou roberto") }
@@ -101,9 +96,15 @@ private fun Dashboard() {
             scope.launch {
                 coordinator.unloadModel()
                 val result = ModelInstaller.installFromUri(context, uri)
-                modelInstalled = modelExists()
+                modelInfo = ModelInstaller.installedMetadata(context)
                 modelMessage = result.fold(
-                    onSuccess = { "IA instalada • %.1f MB • SHA-256 %s…".format(it.bytes / 1_048_576.0, it.sha256.take(10)) },
+                    onSuccess = {
+                        val trust = if (it.trusted) "verificado" else "não verificado"
+                        "Modelo $trust • %.1f MB • SHA-256 %s…".format(
+                            it.bytes / 1_048_576.0,
+                            it.sha256.take(10)
+                        )
+                    },
                     onFailure = { "Falha ao instalar IA: ${it.message}" }
                 )
             }
@@ -162,7 +163,7 @@ private fun Dashboard() {
         item {
             StatusCard(
                 screeningEnabled = screeningEnabled,
-                modelInstalled = modelInstalled,
+                modelInfo = modelInfo,
                 modelMessage = modelMessage,
                 onEnable = {
                     if (roleManager?.isRoleAvailable(RoleManager.ROLE_CALL_SCREENING) == true) {
@@ -186,7 +187,10 @@ private fun Dashboard() {
                 colors = CardDefaults.cardColors(containerColor = Color.White)
             ) {
                 Column(Modifier.padding(16.dp)) {
-                    Text(call.phoneNumber, fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(call.phoneNumber, fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+                        if (call.isDemo) DemoBadge()
+                    }
                     call.callerName?.let {
                         Text(it, color = Color(0xFF027A48), fontWeight = FontWeight.SemiBold)
                     }
@@ -200,9 +204,7 @@ private fun Dashboard() {
             OutlinedButton(
                 onClick = { confirmClearHistory = true },
                 enabled = calls.isNotEmpty()
-            ) {
-                Text("Apagar histórico local")
-            }
+            ) { Text("Apagar histórico local") }
         }
 
         item {
@@ -214,7 +216,11 @@ private fun Dashboard() {
             ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        if (modelInstalled) "Testando FunctionGemma instalado" else "Modo demonstração sem modelo instalado",
+                        when {
+                            modelInfo == null -> "Modo demonstração sem modelo instalado"
+                            modelInfo?.trusted == true -> "Testando modelo CallGuard verificado"
+                            else -> "Testando modelo local NÃO VERIFICADO"
+                        },
                         fontWeight = FontWeight.SemiBold
                     )
                     OutlinedTextField(
@@ -256,9 +262,7 @@ private fun Dashboard() {
                                 classifying = false
                             }
                         }
-                    ) {
-                        Text(if (classifying) "Analisando…" else "Analisar ligação")
-                    }
+                    ) { Text(if (classifying) "Analisando…" else "Analisar ligação") }
                     demoResult?.let {
                         Text(it, color = Color(0xFF344054), lineHeight = 20.sp)
                     }
@@ -276,7 +280,7 @@ private fun Dashboard() {
 @Composable
 private fun StatusCard(
     screeningEnabled: Boolean,
-    modelInstalled: Boolean,
+    modelInfo: InstalledModelInfo?,
     modelMessage: String?,
     onEnable: () -> Unit,
     onInstallModel: () -> Unit
@@ -286,30 +290,33 @@ private fun StatusCard(
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF111827))
     ) {
-        Column(Modifier.padding(18.dp)) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Proteção", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-            Spacer(Modifier.height(8.dp))
             Text(
                 if (screeningEnabled) "Triagem do Android ativada" else "Triagem do Android ainda não ativada",
                 color = Color(0xFFD1D5DB)
             )
             Text(
-                if (modelInstalled) "FunctionGemma local instalado" else "FunctionGemma ainda não instalado • APK permanece leve",
-                color = Color(0xFFD1D5DB),
-                modifier = Modifier.padding(top = 3.dp)
+                when {
+                    modelInfo == null -> "Modelo local ainda não instalado • APK permanece leve"
+                    modelInfo.trusted -> "Modelo CallGuard verificado instalado"
+                    else -> "Modelo local instalado • NÃO VERIFICADO"
+                },
+                color = Color(0xFFD1D5DB)
             )
             modelMessage?.let {
-                Text(it, color = Color(0xFF9CA3AF), fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+                Text(it, color = Color(0xFF9CA3AF), fontSize = 12.sp)
             }
-            Spacer(Modifier.height(14.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Button(onClick = onEnable, enabled = !screeningEnabled) {
-                    Text(if (screeningEnabled) "Ativado" else "Ativar proteção")
-                }
-                OutlinedButton(onClick = onInstallModel) {
-                    Text(if (modelInstalled) "Trocar IA" else "Instalar IA")
-                }
-            }
+            Spacer(Modifier.height(4.dp))
+            Button(
+                onClick = onEnable,
+                enabled = !screeningEnabled,
+                modifier = Modifier.fillMaxWidth()
+            ) { Text(if (screeningEnabled) "Proteção ativada" else "Ativar proteção") }
+            OutlinedButton(
+                onClick = onInstallModel,
+                modifier = Modifier.fillMaxWidth()
+            ) { Text(if (modelInfo != null) "Trocar modelo local" else "Instalar modelo local") }
         }
     }
 }
@@ -343,9 +350,19 @@ private fun SectionHeader(title: String, count: Int) {
         Box(
             modifier = Modifier.background(Color(0xFFE5E7EB), RoundedCornerShape(99.dp))
                 .padding(horizontal = 10.dp, vertical = 4.dp)
-        ) {
-            Text(count.toString(), fontWeight = FontWeight.SemiBold)
-        }
+        ) { Text(count.toString(), fontWeight = FontWeight.SemiBold) }
+    }
+}
+
+@Composable
+private fun DemoBadge() {
+    Box(
+        modifier = Modifier
+            .padding(start = 8.dp)
+            .background(Color(0xFFE0E7FF), RoundedCornerShape(99.dp))
+            .padding(horizontal = 7.dp, vertical = 2.dp)
+    ) {
+        Text("DEMO", color = Color(0xFF3730A3), fontSize = 10.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -371,17 +388,18 @@ private fun CallRow(call: CallRecord) {
                     },
                     RoundedCornerShape(14.dp)
                 ).padding(10.dp)
-            ) {
-                Icon(Icons.Default.Phone, contentDescription = null)
-            }
+            ) { Icon(Icons.Default.Phone, contentDescription = null) }
             Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                Text(call.phoneNumber, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(call.phoneNumber, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                    if (call.isDemo) DemoBadge()
+                }
                 Text(call.label, color = Color(0xFF667085), modifier = Modifier.padding(top = 2.dp))
             }
             Text(
                 when (call.decision) {
                     CallDecision.BLOCKED -> "BLOQUEADO"
-                    CallDecision.ALLOWED -> "REAL"
+                    CallDecision.ALLOWED -> "PERMITIDA"
                     CallDecision.PENDING -> "PENDENTE"
                 },
                 color = when (call.decision) {
