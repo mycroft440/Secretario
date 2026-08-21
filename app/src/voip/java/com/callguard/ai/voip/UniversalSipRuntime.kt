@@ -1,6 +1,7 @@
 package com.callguard.ai.voip
 
 import android.content.Context
+import com.callguard.ai.data.CallCategory
 import com.callguard.ai.data.CallDecision
 import com.callguard.ai.data.CallRecord
 import com.callguard.ai.data.CallRepository
@@ -52,13 +53,7 @@ data class VoipCallSnapshot(
     val awaitingUser: Boolean = false
 )
 
-/**
- * PJSIP/PJSUA2 runtime used only by the Android 10+ VoIP flavor.
- *
- * The SIP call is answered into a null audio device first, so the caller can
- * speak to the local AI without audio reaching the user. If approved, the same
- * live SIP call is later connected to Android's real capture/playback devices.
- */
+/** PJSIP/PJSUA2 runtime used only by the Android 10+ VoIP flavor. */
 object UniversalSipRuntime {
     private val lock = Any()
     private var endpoint: Endpoint? = null
@@ -103,8 +98,8 @@ object UniversalSipRuntime {
             val sipAccount = CallGuardSipAccount().also { it.create(accConfig, true) }
 
             ep.libStart()
-            // Null device supplies only the conference-bridge clock. It does not
-            // capture microphone or play caller audio to the user during AI triage.
+            // Null device keeps the media clock alive while isolating the user
+            // from caller audio during the local-AI triage phase.
             ep.audDevManager().setNullDev()
 
             endpoint = ep
@@ -142,7 +137,7 @@ object UniversalSipRuntime {
     }
 
     internal fun acceptIncoming(account: Account, callId: Int) {
-        val ep = endpoint ?: return
+        if (endpoint == null) return
         if (sessions.isNotEmpty() || callsById.isNotEmpty()) {
             runCatching {
                 val busy = CallGuardSipCall(account, callId)
@@ -168,13 +163,13 @@ object UniversalSipRuntime {
     }
 
     internal fun onMediaReady(call: CallGuardSipCall, audioMedia: AudioMedia) {
-        if (sessions.values.any { it.callId == call.id }) return
+        if (sessions.values.any { it.callId == call.nativeCallId }) return
         val context = appContext ?: return
         val ep = endpoint ?: return
         val ci = runCatching { call.info }.getOrNull() ?: return
         val token = UUID.randomUUID().toString()
         val caller = extractCaller(ci)
-        val session = SipCallSession(token, call.id, caller, call, audioMedia, ep)
+        val session = SipCallSession(token, call.nativeCallId, caller, call, audioMedia, ep)
         sessions[token] = session
         _calls.value = _calls.value + (token to VoipCallSnapshot(token, caller))
         _status.value = _status.value.copy(detail = "IA atendendo $caller")
@@ -185,8 +180,8 @@ object UniversalSipRuntime {
     }
 
     internal fun onDisconnected(call: CallGuardSipCall) {
-        callsById.remove(call.id)
-        val entry = sessions.entries.firstOrNull { it.value.callId == call.id }
+        callsById.remove(call.nativeCallId)
+        val entry = sessions.entries.firstOrNull { it.value.callId == call.nativeCallId }
         if (entry != null) {
             sessions.remove(entry.key)?.closeWithoutDecision()
             _calls.value = _calls.value - entry.key
@@ -211,7 +206,8 @@ object UniversalSipRuntime {
     }
 
     fun presentToUser(context: Context, token: String, summary: String): Result<Unit> {
-        val session = sessions[token] ?: return Result.failure(IllegalStateException("Sessão SIP ausente."))
+        val session = sessions[token]
+            ?: return Result.failure(IllegalStateException("Sessão SIP ausente."))
         updateCall(token, null, summary, true)
         return VoipPhoneAccountManager.presentIncomingCall(
             context = context,
@@ -222,11 +218,10 @@ object UniversalSipRuntime {
     }
 
     suspend fun handoffToUser(token: String): Result<Unit> {
-        val session = sessions[token] ?: return Result.failure(IllegalStateException("Sessão SIP ausente."))
+        val session = sessions[token]
+            ?: return Result.failure(IllegalStateException("Sessão SIP ausente."))
         val result = session.handoffToUser()
-        if (result.isSuccess) {
-            updateCall(token, null, _calls.value[token]?.summary, false)
-        }
+        if (result.isSuccess) updateCall(token, null, _calls.value[token]?.summary, false)
         return result
     }
 
@@ -252,12 +247,13 @@ object UniversalSipRuntime {
         }
     }
 
-    internal class CallGuardSipCall(account: Account, callId: Int) : Call(account, callId) {
+    internal class CallGuardSipCall(
+        account: Account,
+        val nativeCallId: Int
+    ) : Call(account, nativeCallId) {
         override fun onCallState(prm: OnCallStateParam?) {
             val ci = runCatching { info }.getOrNull() ?: return
-            if (ci.state == pjsip_inv_state.PJSIP_INV_STATE_DISCONNECTED) {
-                onDisconnected(this)
-            }
+            if (ci.state == pjsip_inv_state.PJSIP_INV_STATE_DISCONNECTED) onDisconnected(this)
         }
 
         override fun onCallMediaState(prm: OnCallMediaStateParam?) {
@@ -267,8 +263,7 @@ object UniversalSipRuntime {
                     media.type == pjmedia_type.PJMEDIA_TYPE_AUDIO &&
                     media.status == pjsua_call_media_status.PJSUA_CALL_MEDIA_ACTIVE
                 ) {
-                    runCatching { getAudioMedia(index) }
-                        .onSuccess { onMediaReady(this, it) }
+                    runCatching { getAudioMedia(index) }.onSuccess { onMediaReady(this, it) }
                 }
             }
         }
@@ -326,8 +321,6 @@ class SipCallSession internal constructor(
             if (!handedOff.compareAndSet(false, true)) return@runCatching
 
             val audio = endpoint.audDevManager()
-            // Selecting the real devices after the AI phase replaces the null
-            // sound device and only now connects the user to the live SIP call.
             val devices = audio.enumDev2()
             val capture = devices.firstOrNull { it.inputCount > 0 }?.id
                 ?: error("Nenhum microfone disponível.")
@@ -343,9 +336,7 @@ class SipCallSession internal constructor(
     suspend fun terminate(): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             if (!closed.compareAndSet(false, true)) return@runCatching
-            val prm = CallOpParam(true).apply {
-                statusCode = pjsip_status_code.PJSIP_SC_DECLINE
-            }
+            val prm = CallOpParam(true).apply { statusCode = pjsip_status_code.PJSIP_SC_DECLINE }
             call.hangup(prm)
         }
     }
@@ -358,15 +349,26 @@ class SipCallSession internal constructor(
         }
     }
 
-    fun recordHistory(decision: CallDecision, label: String, transcript: String?, summary: String?) {
+    fun recordHistory(
+        decision: CallDecision,
+        category: CallCategory,
+        label: String,
+        transcript: String?,
+        summary: String?,
+        callerName: String? = null,
+        confidence: Float? = null
+    ) {
         CallRepository.upsert(
             CallRecord(
                 id = System.currentTimeMillis(),
                 phoneNumber = caller,
                 label = label,
                 decision = decision,
+                category = category,
                 transcript = transcript,
                 summary = summary,
+                callerName = callerName,
+                confidence = confidence,
                 isDemo = false
             )
         )
