@@ -6,6 +6,7 @@ enum class CallCategory {
     REAL_PERSON,
     OPERATOR,
     MARKETING,
+    SCAM,
     ROBOT_OR_SILENT,
     DELIVERY,
     JOB,
