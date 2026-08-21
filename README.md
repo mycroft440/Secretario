@@ -20,15 +20,17 @@ Esses números **não fazem parte da política real de bloqueio**.
 
 - Android `CallScreeningService` e solicitação de `ROLE_CALL_SCREENING`;
 - resposta rápida/conservadora: número desconhecido não é bloqueado sem evidência determinística;
+- compatibilidade do screening a partir do Android 10/API 29, com o sinal de verificação de número usado somente no API 30+;
 - histórico local cifrado com AES-GCM e chave do Android Keystore;
-- app sem permissão `INTERNET` e com backup desativado;
-- exclusão do histórico pelo usuário;
-- LiteRT-LM 0.14.0 + FunctionGemma em modelo `.litertlm` importado pelo seletor de arquivos;
+- app sem permissão `INTERNET`, backup e device-transfer de dados privados desativados;
+- exclusão destrutiva do histórico, ciphertext legado e chave AES pelo usuário;
+- LiteRT-LM 0.16.1 + FunctionGemma em modelo `.litertlm` importado pelo seletor de arquivos;
 - tool calling **manual** com `allowCall`, `blockCall`, `askForClarification`;
-- validação determinística de categoria/confiança antes de aceitar uma decisão do modelo;
+- validação determinística de categoria, confiança finita e cardinalidade antes de aceitar uma decisão do modelo;
 - fallback GPU → CPU;
 - instalação atômica do modelo, SHA-256 e trust allowlist;
-- nenhum modelo marcado como “verificado” até existir uma release CallGuard avaliada;
+- caminho de produção recalcula o SHA-256 do arquivo real antes de carregá-lo;
+- nenhum modelo marcado como autorizado para produção até existir uma release CallGuard avaliada;
 - laboratório para digitar transcrições e testar decisões;
 - dataset seed adversarial + validação em CI;
 - contrato explícito para uma futura ponte PCM bidirecional;
@@ -57,7 +59,7 @@ Arquivo local esperado:
 
 `functiongemma-callguard.litertlm`
 
-O APK não possui Internet. O modelo é obtido externamente e importado pelo seletor de arquivos. A instalação preserva o modelo anterior até concluir, calcula SHA-256 e marca o artefato como verificado somente se o hash estiver na allowlist compilada. A allowlist atual está vazia porque ainda não existe um fine-tune oficial aprovado.
+O APK não possui Internet. O modelo é obtido externamente e importado pelo seletor de arquivos. A instalação preserva o modelo anterior até concluir, calcula SHA-256 e registra o estado de confiança. Antes de qualquer inicialização de **produção**, o app recalcula o SHA-256 do arquivo que será executado e exige correspondência com a allowlist compilada. A allowlist atual está vazia porque ainda não existe um fine-tune oficial aprovado.
 
 ## Build — somente GitHub Actions
 
@@ -67,16 +69,17 @@ A branch revisada usa:
 
 - Android Gradle Plugin 9.3.1;
 - Gradle 9.5.0;
-- JDK 17;
+- JDK 21 para executar Gradle/testes, exigido pelo bytecode atual do LiteRT-LM;
+- bytecode do código do app mantido em Java 17 (`sourceCompatibility`/`targetCompatibility`);
 - compile SDK 37;
-- target SDK 36;
+- target SDK 36, mantido deliberadamente até teste das mudanças de comportamento do Android 17 em hardware/emulador;
 - Compose BOM `2026.08.00`;
-- LiteRT-LM Android `0.14.0` fixado;
+- LiteRT-LM Android `0.16.1` fixado;
 - coroutines `1.11.0` fixado.
 
 O workflow:
 
-1. instala SDK/API 37;
+1. instala SDK/API 37 (`platforms;android-37.0`);
 2. valida o dataset seed;
 3. executa testes unitários;
 4. executa Android lint;
@@ -85,4 +88,4 @@ O workflow:
 
 ## Próximos passos
 
-Veja [`PLAN.md`](PLAN.md) para arquitetura/fases e [`training/README.md`](training/README.md) para fine-tuning e gates de avaliação.
+Veja [`PLAN.md`](PLAN.md) para arquitetura/fases, [`training/README.md`](training/README.md) para fine-tuning/gates de avaliação, [`PRIVACY.md`](PRIVACY.md) para requisitos de dados e [`THIRD_PARTY.md`](THIRD_PARTY.md) para licenças/termos de terceiros.
