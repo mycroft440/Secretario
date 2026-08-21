@@ -53,14 +53,9 @@ class Android17AudioProcessingController private constructor(
     }
 
     companion object {
-        /**
-         * Safe factory for code that supports Android 10+ without touching API
-         * 37-only methods on older devices.
-         */
+        /** Safe factory for code that supports Android 10+ without touching API 37 on older devices. */
         fun create(connection: Connection): Result<Android17AudioProcessingController> {
-            // Keep the platform guard explicit so Android Lint can prove that
-            // API 37-only symbols below are unreachable on Android 10–16.
-            if (Build.VERSION.SDK_INT < AudioProcessingEligibility.MIN_API_LEVEL) {
+            if (Build.VERSION.SDK_INT < 37) {
                 return Result.failure(
                     UnsupportedOperationException(
                         "Audio Processing público requer Android 17/API 37."
@@ -70,7 +65,7 @@ class Android17AudioProcessingController private constructor(
 
             val isExternalCall =
                 connection.connectionProperties and Connection.PROPERTY_IS_EXTERNAL_CALL != 0
-            if (!AudioProcessingEligibility.canUseExternalCallAudioProcessing(37, isExternalCall)) {
+            if (!isExternalCall) {
                 return Result.failure(
                     UnsupportedOperationException(
                         "Audio Processing público exige uma chamada PROPERTY_IS_EXTERNAL_CALL."
