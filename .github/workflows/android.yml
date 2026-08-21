@@ -31,7 +31,9 @@ jobs:
       - name: Set up Android SDK 37
         uses: android-actions/setup-android@v4
         with:
-          packages: 'platform-tools platforms;android-37 build-tools;36.0.0'
+          # Android 17/Cinnamon Bun is currently published by sdkmanager as
+          # android-37.0 even though Gradle's compileSdk remains integer 37.
+          packages: 'platform-tools platforms;android-37.0 build-tools;36.0.0'
           log-accepted-android-sdk-licenses: false
 
       # AGP 9.3 requires Gradle 9.5.0 or newer. Build tooling is installed only
