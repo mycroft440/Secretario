@@ -12,12 +12,17 @@ import java.security.MessageDigest
 data class InstalledModelInfo(
     val file: File,
     val bytes: Long,
-    val sha256: String
+    val sha256: String,
+    val trusted: Boolean
 )
 
 object ModelInstaller {
     private const val MIN_MODEL_BYTES = 50L * 1024L * 1024L
     private const val MAX_MODEL_BYTES = 1_500L * 1024L * 1024L
+    private const val PREFS = "callguard_model_metadata"
+    private const val KEY_SHA256 = "sha256"
+    private const val KEY_BYTES = "bytes"
+    private const val KEY_TRUSTED = "trusted"
 
     suspend fun installFromUri(context: Context, source: Uri): Result<InstalledModelInfo> =
         withContext(Dispatchers.IO) {
@@ -54,8 +59,8 @@ object ModelInstaller {
                     "Tamanho incompatível com o modelo offline esperado"
                 }
                 val digest = sha256(temp)
+                val trusted = ModelTrust.isTrusted(digest)
 
-                // Keep the previous working model until the new file is safely in place.
                 if (destination.exists()) {
                     require(destination.renameTo(backup)) { "Não foi possível preservar o modelo anterior" }
                 }
@@ -66,18 +71,52 @@ object ModelInstaller {
                 }
                 backup.delete()
 
-                InstalledModelInfo(destination, destination.length(), digest)
+                InstalledModelInfo(destination, destination.length(), digest, trusted).also {
+                    saveMetadata(context, it)
+                }
             }.also {
                 File(context.filesDir, "models/${FunctionGemmaTriageEngine.MODEL_FILE}.part").delete()
             }
         }
 
+    fun installedMetadata(context: Context): InstalledModelInfo? {
+        val file = File(context.filesDir, "models/${FunctionGemmaTriageEngine.MODEL_FILE}")
+        if (!file.exists() || file.length() < MIN_MODEL_BYTES) return null
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val sha = prefs.getString(KEY_SHA256, null) ?: return InstalledModelInfo(
+            file = file,
+            bytes = file.length(),
+            sha256 = "desconhecido",
+            trusted = false
+        )
+        val bytes = prefs.getLong(KEY_BYTES, file.length())
+        val storedTrusted = prefs.getBoolean(KEY_TRUSTED, false)
+        return InstalledModelInfo(
+            file = file,
+            bytes = bytes,
+            sha256 = sha,
+            // Trust is re-evaluated against the compiled allowlist so stale prefs
+            // cannot turn an untrusted hash into a trusted release.
+            trusted = storedTrusted && ModelTrust.isTrusted(sha)
+        )
+    }
+
     suspend fun remove(context: Context): Boolean = withContext(Dispatchers.IO) {
         val dir = File(context.filesDir, "models")
-        File(dir, FunctionGemmaTriageEngine.MODEL_FILE).delete().also {
-            File(dir, "${FunctionGemmaTriageEngine.MODEL_FILE}.part").delete()
-            File(dir, "${FunctionGemmaTriageEngine.MODEL_FILE}.bak").delete()
-        }
+        val deleted = File(dir, FunctionGemmaTriageEngine.MODEL_FILE).delete()
+        File(dir, "${FunctionGemmaTriageEngine.MODEL_FILE}.part").delete()
+        File(dir, "${FunctionGemmaTriageEngine.MODEL_FILE}.bak").delete()
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
+        deleted
+    }
+
+    private fun saveMetadata(context: Context, info: InstalledModelInfo) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_SHA256, info.sha256)
+            .putLong(KEY_BYTES, info.bytes)
+            .putBoolean(KEY_TRUSTED, info.trusted)
+            .apply()
     }
 
     private fun validateDisplayName(context: Context, source: Uri) {
