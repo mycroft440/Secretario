@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.role.RoleManager
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.telecom.Call
 import android.telecom.TelecomManager
@@ -133,6 +134,10 @@ private fun PrivilegedDialerScreen() {
 @Composable
 private fun CallCard(snapshot: PrivilegedCallRegistry.Snapshot) {
     val call = PrivilegedCallRegistry.get(snapshot.token) ?: return
+    val audioProcessing =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+            snapshot.state == Call.STATE_AUDIO_PROCESSING
+
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -141,19 +146,23 @@ private fun CallCard(snapshot: PrivilegedCallRegistry.Snapshot) {
             Text(snapshot.number ?: "Número indisponível")
             Text(callStateLabel(snapshot.state))
 
-            when (snapshot.state) {
-                Call.STATE_RINGING -> Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(onClick = { call.answer(VideoProfile.STATE_AUDIO_ONLY) }) {
-                        Text("Atender")
-                    }
-                    OutlinedButton(onClick = { call.reject(false, null) }) {
-                        Text("Recusar")
+            when {
+                snapshot.state == Call.STATE_RINGING -> {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Button(onClick = { call.answer(VideoProfile.STATE_AUDIO_ONLY) }) {
+                            Text("Atender")
+                        }
+                        OutlinedButton(onClick = { call.reject(false, null) }) {
+                            Text("Recusar")
+                        }
                     }
                 }
-                Call.STATE_AUDIO_PROCESSING -> {
-                    Text("Triagem de áudio em andamento; a chamada ainda não foi apresentada ao usuário.")
+                audioProcessing -> {
+                    Text(
+                        "Triagem de áudio em andamento; a chamada ainda não foi apresentada ao usuário."
+                    )
                 }
-                Call.STATE_DISCONNECTED -> Unit
+                snapshot.state == Call.STATE_DISCONNECTED -> Unit
                 else -> OutlinedButton(onClick = call::disconnect) {
                     Text("Encerrar")
                 }
@@ -162,17 +171,21 @@ private fun CallCard(snapshot: PrivilegedCallRegistry.Snapshot) {
     }
 }
 
-private fun callStateLabel(state: Int): String = when (state) {
-    Call.STATE_NEW -> "Nova"
-    Call.STATE_DIALING -> "Discando"
-    Call.STATE_RINGING -> "Recebendo chamada"
-    Call.STATE_HOLDING -> "Em espera"
-    Call.STATE_ACTIVE -> "Em chamada"
-    Call.STATE_DISCONNECTED -> "Encerrada"
-    Call.STATE_CONNECTING -> "Conectando"
-    Call.STATE_DISCONNECTING -> "Encerrando"
-    Call.STATE_SELECT_PHONE_ACCOUNT -> "Selecionando conta"
-    Call.STATE_AUDIO_PROCESSING -> "IA processando áudio"
-    Call.STATE_SIMULATED_RINGING -> "Apresentando ao usuário"
-    else -> "Estado $state"
+private fun callStateLabel(state: Int): String {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        if (state == Call.STATE_AUDIO_PROCESSING) return "IA processando áudio"
+        if (state == Call.STATE_SIMULATED_RINGING) return "Apresentando ao usuário"
+    }
+
+    return when (state) {
+        Call.STATE_NEW -> "Nova"
+        Call.STATE_DIALING -> "Discando"
+        Call.STATE_RINGING -> "Recebendo chamada"
+        Call.STATE_HOLDING -> "Em espera"
+        Call.STATE_ACTIVE -> "Em chamada"
+        Call.STATE_DISCONNECTED -> "Encerrada"
+        Call.STATE_CONNECTING -> "Conectando"
+        Call.STATE_SELECT_PHONE_ACCOUNT -> "Selecionando conta"
+        else -> "Estado $state"
+    }
 }
