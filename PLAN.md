@@ -119,6 +119,8 @@ O metadado salvo **não autoriza produção sozinho**. Antes de inicializar um m
 
 A allowlist está vazia até produzirmos um modelo oficial. Uma release de produção deverá publicar manifesto com versão, hash, tamanho, runtime testado e métricas do conjunto `test_locked`.
 
+O fato de o modelo estar fora do APK não torna o runtime pequeno. O artifact debug universal do run #107 ficou em aproximadamente **107 MiB**, dominado pelo LiteRT-LM, DEX/dependências e bibliotecas nativas para duas ABIs. Esse valor é referência de desenvolvimento, não meta de release. A distribuição final deve usar App Bundle/ABI splits quando aplicável, avaliar R8/minificação com regras compatíveis com o runtime e medir tamanho real por arquitetura antes de qualquer promessa pública.
+
 ## Dataset e gates de produção
 
 O seed é somente desenvolvimento. O fine-tuning sério deve ter `train`, `validation`, `test_locked`, `red_team` e, se houver consentimento, `real_opt_in`.
@@ -156,7 +158,7 @@ Antes de ativar bloqueio por IA:
 - [x] fallback GPU → CPU;
 - [x] dataset seed adversarial e gates de avaliação;
 - [x] fronteira explícita de áudio;
-- [ ] GitHub Actions verde para a branch revisada.
+- [ ] GitHub Actions verde para o commit final da branch revisada.
 
 ### Fase 2 — modelos de voz, ainda fora de chamada real
 
@@ -186,5 +188,8 @@ Antes de ativar bloqueio por IA:
 - [ ] testes instrumentados e matriz de dispositivos;
 - [ ] política de retenção configurável;
 - [ ] regras do usuário: sempre permitir/bloquear;
+- [ ] gerar App Bundle/ABI splits e medir download/instalação por arquitetura;
+- [ ] validar R8/minificação com LiteRT-LM e comparar tamanho/latência antes e depois;
+- [ ] definir meta de tamanho somente após medição do pacote otimizado;
 - [ ] revisão de LGPD, consentimento de gravação/transcrição e requisitos da Play Store/distribuição escolhida;
 - [ ] política de rollback de app e modelo.
