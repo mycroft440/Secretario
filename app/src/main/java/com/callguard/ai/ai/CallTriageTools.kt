@@ -6,6 +6,7 @@ import com.callguard.ai.data.TriageResult
 import com.google.ai.edge.litertlm.Tool
 import com.google.ai.edge.litertlm.ToolParam
 import com.google.ai.edge.litertlm.ToolSet
+import java.util.Locale
 
 /**
  * Tool schema exposed to FunctionGemma plus deterministic application policy.
@@ -124,13 +125,15 @@ class CallTriageTools : ToolSet {
 
     private fun Map<String, Any?>.string(key: String): String = this[key]?.toString().orEmpty()
 
-    private fun Map<String, Any?>.number(key: String): Double =
-        (this[key] as? Number)?.toDouble()
+    private fun Map<String, Any?>.number(key: String): Double {
+        val value = (this[key] as? Number)?.toDouble()
             ?: this[key]?.toString()?.toDoubleOrNull()
-            ?: 0.0
+            ?: return 0.0
+        return if (value.isFinite()) value else 0.0
+    }
 
     private fun String.toCategory(): CallCategory = runCatching {
-        CallCategory.valueOf(trim().uppercase())
+        CallCategory.valueOf(trim().uppercase(Locale.ROOT))
     }.getOrDefault(CallCategory.UNKNOWN)
 
     private fun String.cleanText(maxLength: Int): String =
