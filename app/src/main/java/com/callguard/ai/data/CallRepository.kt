@@ -1,16 +1,28 @@
 package com.callguard.ai.data
 
 import android.content.Context
-import org.json.JSONArray
-import org.json.JSONObject
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import org.json.JSONArray
+import org.json.JSONObject
+import java.security.KeyStore
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 
 object CallRepository {
     private const val PREFS = "callguard_history"
-    private const val KEY_CALLS = "calls_json_v2"
+    private const val KEY_CALLS_ENCRYPTED = "calls_json_v3_encrypted"
+    private const val KEY_CALLS_LEGACY = "calls_json_v2"
+    private const val KEY_DEMO_SEEDED = "demo_seeded_v1"
+    private const val KEY_ALIAS = "callguard_history_aes_v1"
     private const val MAX_HISTORY = 250
+    private const val GCM_TAG_BITS = 128
 
     private var appContext: Context? = null
     private val _calls = MutableStateFlow<List<CallRecord>>(emptyList())
@@ -19,9 +31,25 @@ object CallRepository {
     fun initialize(context: Context) {
         if (appContext != null) return
         appContext = context.applicationContext
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val stored = readStored()
-        _calls.value = if (stored.isEmpty()) seed() else stored
-        if (stored.isEmpty()) persist()
+        val demoWasSeeded = prefs.getBoolean(KEY_DEMO_SEEDED, false)
+
+        _calls.value = when {
+            stored.isNotEmpty() -> stored
+            demoWasSeeded -> emptyList()
+            else -> seed()
+        }
+
+        if (!demoWasSeeded) {
+            prefs.edit().putBoolean(KEY_DEMO_SEEDED, true).apply()
+        }
+
+        // Migrates legacy plaintext history and persists the first demo seed in
+        // encrypted form. Legacy content is removed only after encryption succeeds.
+        if (prefs.contains(KEY_CALLS_LEGACY) || (!demoWasSeeded && _calls.value.isNotEmpty())) {
+            if (persist()) prefs.edit().remove(KEY_CALLS_LEGACY).apply()
+        }
     }
 
     @Synchronized
@@ -46,15 +74,52 @@ object CallRepository {
     }
 
     @Synchronized
-    fun resetDemo() {
-        _calls.value = seed()
+    fun clearHistory() {
+        _calls.value = emptyList()
+        appContext?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            ?.edit()?.putBoolean(KEY_DEMO_SEEDED, true)?.apply()
         persist()
     }
 
-    private fun persist() {
-        val context = appContext ?: return
+    @Synchronized
+    fun resetDemo() {
+        _calls.value = seed()
+        appContext?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            ?.edit()?.putBoolean(KEY_DEMO_SEEDED, true)?.apply()
+        persist()
+    }
+
+    /** Returns false instead of crashing the call flow if secure storage fails. */
+    private fun persist(): Boolean {
+        val context = appContext ?: return false
+        val raw = serialize(_calls.value)
+        return runCatching {
+            val encrypted = encrypt(raw)
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putString(KEY_CALLS_ENCRYPTED, encrypted)
+                .apply()
+            true
+        }.getOrDefault(false)
+    }
+
+    private fun readStored(): List<CallRecord> {
+        val context = appContext ?: return emptyList()
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+        val encrypted = prefs.getString(KEY_CALLS_ENCRYPTED, null)
+        if (!encrypted.isNullOrBlank()) {
+            return runCatching { parse(decrypt(encrypted)) }.getOrElse { emptyList() }
+        }
+
+        // One-time migration path from the original plaintext MVP format.
+        val legacy = prefs.getString(KEY_CALLS_LEGACY, null) ?: return emptyList()
+        return runCatching { parse(legacy) }.getOrElse { emptyList() }
+    }
+
+    private fun serialize(records: List<CallRecord>): String {
         val array = JSONArray()
-        _calls.value.forEach { call ->
+        records.forEach { call ->
             array.put(JSONObject().apply {
                 put("id", call.id)
                 put("phoneNumber", call.phoneNumber)
@@ -68,38 +133,66 @@ object CallRepository {
                 put("timestamp", call.timestamp)
             })
         }
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit()
-            .putString(KEY_CALLS, array.toString())
-            .apply()
+        return array.toString()
     }
 
-    private fun readStored(): List<CallRecord> {
-        val context = appContext ?: return emptyList()
-        val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_CALLS, null) ?: return emptyList()
-        return runCatching {
-            val array = JSONArray(raw)
-            buildList {
-                for (i in 0 until array.length()) {
-                    val obj = array.getJSONObject(i)
-                    add(
-                        CallRecord(
-                            id = obj.getLong("id"),
-                            phoneNumber = obj.getString("phoneNumber"),
-                            label = obj.getString("label"),
-                            decision = enumValueOrDefault(obj.optString("decision"), CallDecision.PENDING),
-                            category = enumValueOrDefault(obj.optString("category"), CallCategory.UNKNOWN),
-                            transcript = obj.optNullableString("transcript"),
-                            summary = obj.optNullableString("summary"),
-                            callerName = obj.optNullableString("callerName"),
-                            confidence = if (obj.isNull("confidence")) null else obj.optDouble("confidence").toFloat(),
-                            timestamp = obj.optLong("timestamp", System.currentTimeMillis())
-                        )
+    private fun parse(raw: String): List<CallRecord> {
+        val array = JSONArray(raw)
+        return buildList {
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                add(
+                    CallRecord(
+                        id = obj.getLong("id"),
+                        phoneNumber = obj.getString("phoneNumber"),
+                        label = obj.getString("label"),
+                        decision = enumValueOrDefault(obj.optString("decision"), CallDecision.PENDING),
+                        category = enumValueOrDefault(obj.optString("category"), CallCategory.UNKNOWN),
+                        transcript = obj.optNullableString("transcript"),
+                        summary = obj.optNullableString("summary"),
+                        callerName = obj.optNullableString("callerName"),
+                        confidence = if (obj.isNull("confidence")) null else obj.optDouble("confidence").toFloat(),
+                        timestamp = obj.optLong("timestamp", System.currentTimeMillis())
                     )
-                }
+                )
             }
-        }.getOrElse { emptyList() }
+        }.sortedByDescending { it.timestamp }.take(MAX_HISTORY)
+    }
+
+    private fun encrypt(plainText: String): String {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
+        val ciphertext = cipher.doFinal(plainText.toByteArray(Charsets.UTF_8))
+        return Base64.encodeToString(cipher.iv, Base64.NO_WRAP) + "." +
+            Base64.encodeToString(ciphertext, Base64.NO_WRAP)
+    }
+
+    private fun decrypt(payload: String): String {
+        val pieces = payload.split('.', limit = 2)
+        require(pieces.size == 2) { "Histórico criptografado inválido" }
+        val iv = Base64.decode(pieces[0], Base64.NO_WRAP)
+        val ciphertext = Base64.decode(pieces[1], Base64.NO_WRAP)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
+        return cipher.doFinal(ciphertext).toString(Charsets.UTF_8)
+    }
+
+    private fun getOrCreateKey(): SecretKey {
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        (keyStore.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
+
+        val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+        generator.init(
+            KeyGenParameterSpec.Builder(
+                KEY_ALIAS,
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+            )
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build()
+        )
+        return generator.generateKey()
     }
 
     private inline fun <reified T : Enum<T>> enumValueOrDefault(value: String, fallback: T): T =
@@ -117,7 +210,7 @@ object CallRepository {
                 label = "operadora",
                 decision = CallDecision.BLOCKED,
                 category = CallCategory.OPERATOR,
-                summary = "Ligação identificada como oferta de operadora.",
+                summary = "Exemplo: oferta de operadora.",
                 timestamp = now - 120_000L
             ),
             CallRecord(
@@ -127,7 +220,7 @@ object CallRepository {
                 decision = CallDecision.ALLOWED,
                 category = CallCategory.REAL_PERSON,
                 transcript = "preciso falar com você troquei de número sou roberto",
-                summary = "Roberto informou que trocou de número e precisa falar com você.",
+                summary = "Exemplo: Roberto informou que trocou de número e precisa falar com você.",
                 callerName = "Roberto",
                 confidence = 0.96f,
                 timestamp = now - 60_000L
@@ -138,7 +231,7 @@ object CallRepository {
                 label = "robô/ligação muda",
                 decision = CallDecision.BLOCKED,
                 category = CallCategory.ROBOT_OR_SILENT,
-                summary = "Robô ou chamada sem fala detectada.",
+                summary = "Exemplo: robô ou chamada sem fala.",
                 timestamp = now
             )
         )
