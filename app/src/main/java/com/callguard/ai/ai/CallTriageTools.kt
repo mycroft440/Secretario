@@ -8,9 +8,8 @@ import com.google.ai.edge.litertlm.ToolParam
 import com.google.ai.edge.litertlm.ToolSet
 
 /**
- * Tool schema exposed to FunctionGemma plus the application-side policy that
- * validates every proposed action. The model proposes a tool call; it never
- * directly controls Android telephony.
+ * Tool schema exposed to FunctionGemma plus deterministic application policy.
+ * The model proposes an action; it never directly controls Android telephony.
  */
 class CallTriageTools : ToolSet {
     companion object {
@@ -27,6 +26,7 @@ class CallTriageTools : ToolSet {
         private val BLOCK_CATEGORIES = setOf(
             CallCategory.OPERATOR,
             CallCategory.MARKETING,
+            CallCategory.SCAM,
             CallCategory.ROBOT_OR_SILENT
         )
     }
@@ -42,26 +42,21 @@ class CallTriageTools : ToolSet {
     ): Map<String, Any> = mapOf("accepted" to true)
 
     @Tool(
-        description = "Block an unwanted call. Use for telemarketing, operator sales, prerecorded robot, scam-like solicitation, or a silent call."
+        description = "Block an unwanted call. Use only for clear telemarketing, operator sales, scam/fraud solicitation, or a prerecorded robot. Silence must be confirmed by the audio/VAD layer rather than inferred from missing text."
     )
     fun blockCall(
-        @ToolParam(description = "Category: OPERATOR, MARKETING or ROBOT_OR_SILENT") category: String,
+        @ToolParam(description = "Category: OPERATOR, MARKETING, SCAM or ROBOT_OR_SILENT") category: String,
         @ToolParam(description = "Short Portuguese reason for blocking") reason: String,
         @ToolParam(description = "Confidence from 0.0 to 1.0") confidence: Double
     ): Map<String, Any> = mapOf("accepted" to true)
 
     @Tool(
-        description = "Ask one short follow-up question only when the caller's purpose is ambiguous. Prefer asking for the reason of the call."
+        description = "Ask one short follow-up question when the caller's purpose or identity claim is ambiguous. Prefer abstaining over an uncertain block."
     )
     fun askForClarification(
         @ToolParam(description = "Short question in Brazilian Portuguese") question: String
     ): Map<String, Any> = mapOf("accepted" to true)
 
-    /**
-     * Executes a model-proposed tool call under deterministic app policy.
-     * Invalid/mismatched/low-confidence calls become PENDING instead of being
-     * allowed or blocked blindly.
-     */
     fun resolveManualCall(name: String, arguments: Map<String, Any?>): TriageResult = when (name) {
         "allowCall" -> resolveAllow(arguments)
         "blockCall" -> resolveBlock(arguments)
