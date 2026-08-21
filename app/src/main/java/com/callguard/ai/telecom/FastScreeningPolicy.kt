@@ -1,16 +1,13 @@
 package com.callguard.ai.telecom
 
 /**
- * Deterministic decision layer for CallScreeningService.
+ * Deterministic, synchronous decision layer for CallScreeningService.
  *
- * Android gives the screening service only a few seconds, so this layer must
- * stay local and predictable. Carrier verification failure is treated as a
- * risk signal, not as proof of spam: legitimate calls must not be rejected on
- * that signal alone.
+ * Demo data must never become a production blocking rule. Until the app has a
+ * supported audio path or an explicit user blocklist, unknown calls are allowed.
+ * Carrier verification failure is only a risk signal, never proof of spam.
  */
 object FastScreeningPolicy {
-    private val demoBlockedNumbers = setOf("389393939", "838383893")
-
     data class Result(
         val block: Boolean,
         val reason: String,
@@ -18,14 +15,6 @@ object FastScreeningPolicy {
     )
 
     fun evaluate(number: String, verificationFailed: Boolean): Result {
-        if (number in demoBlockedNumbers) {
-            return Result(
-                block = true,
-                reason = if (number == "389393939") "operadora" else "robô/ligação muda",
-                suspicious = true
-            )
-        }
-
         if (verificationFailed) {
             return Result(
                 block = false,
@@ -34,6 +23,9 @@ object FastScreeningPolicy {
             )
         }
 
-        return Result(block = false, reason = "número desconhecido")
+        return Result(
+            block = false,
+            reason = if (number.isBlank()) "número indisponível" else "número desconhecido"
+        )
     }
 }

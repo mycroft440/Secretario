@@ -6,6 +6,7 @@ enum class CallCategory {
     REAL_PERSON,
     OPERATOR,
     MARKETING,
+    SCAM,
     ROBOT_OR_SILENT,
     DELIVERY,
     JOB,
@@ -24,7 +25,8 @@ data class CallRecord(
     val summary: String? = null,
     val callerName: String? = null,
     val confidence: Float? = null,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val isDemo: Boolean = false
 )
 
 data class TriageResult(

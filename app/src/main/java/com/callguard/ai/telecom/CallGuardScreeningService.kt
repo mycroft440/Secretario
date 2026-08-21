@@ -1,5 +1,6 @@
 package com.callguard.ai.telecom
 
+import android.os.Build
 import android.telecom.Call
 import android.telecom.CallScreeningService
 import android.telecom.Connection
@@ -11,23 +12,26 @@ import com.callguard.ai.data.CallRepository
 /**
  * Public Android call-screening hook.
  *
- * The platform requires a response within 5 seconds. FunctionGemma is therefore
- * deliberately kept OUT of this callback. The AI consumes a transcript later,
- * once a supported audio bridge exists (OEM/privileged or VoIP/SIP path).
+ * Android requires the incoming-call response within five seconds. FunctionGemma,
+ * Keystore access and history I/O are deliberately kept out of the critical path.
  */
 class CallGuardScreeningService : CallScreeningService() {
     override fun onScreenCall(callDetails: Call.Details) {
         if (callDetails.callDirection != Call.Details.DIRECTION_INCOMING) return
 
         val number = callDetails.handle?.schemeSpecificPart.orEmpty()
+        val verificationFailed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            callDetails.callerNumberVerificationStatus == Connection.VERIFICATION_STATUS_FAILED
+        } else {
+            // Caller-number verification status was added in API 30. Android 10
+            // callers are treated as having no verification signal, never as spam.
+            false
+        }
         val policy = FastScreeningPolicy.evaluate(
             number = number,
-            verificationFailed = callDetails.callerNumberVerificationStatus == Connection.VERIFICATION_STATUS_FAILED
+            verificationFailed = verificationFailed
         )
 
-        // Important: a public CallScreeningService cannot silence now and later
-        // re-enable ringing for the SAME call. Therefore non-blocked calls are
-        // allowed to ring normally until the future audio bridge is implemented.
         val response = CallResponse.Builder()
             .setDisallowCall(policy.block)
             .setRejectCall(policy.block)
@@ -36,31 +40,23 @@ class CallGuardScreeningService : CallScreeningService() {
             .setSkipCallLog(false)
             .build()
 
+        // Platform response is always first. Everything below is best-effort history.
         respondToCall(callDetails, response)
 
-        val record = if (policy.block) {
-            CallRecord(
-                id = System.currentTimeMillis(),
-                phoneNumber = number.ifBlank { "Número oculto" },
-                label = policy.reason,
-                decision = CallDecision.BLOCKED,
-                category = when (policy.reason) {
-                    "operadora" -> CallCategory.OPERATOR
-                    "robô/ligação muda" -> CallCategory.ROBOT_OR_SILENT
-                    else -> CallCategory.UNKNOWN
-                },
-                summary = "Bloqueio local realizado antes do toque."
-            )
-        } else {
-            CallRecord(
-                id = System.currentTimeMillis(),
-                phoneNumber = number.ifBlank { "Número oculto" },
-                label = "número desconhecido",
-                decision = CallDecision.PENDING,
-                category = CallCategory.UNKNOWN,
-                summary = "Aguardando uma ponte de áudio compatível para triagem silenciosa por IA."
-            )
-        }
-        CallRepository.add(record)
+        val record = CallRecord(
+            id = callDetails.creationTimeMillis.takeIf { it > 0L } ?: System.currentTimeMillis(),
+            phoneNumber = number.ifBlank { "Número indisponível" },
+            label = policy.reason,
+            decision = if (policy.block) CallDecision.BLOCKED else CallDecision.PENDING,
+            category = CallCategory.UNKNOWN,
+            summary = if (policy.block) {
+                "Bloqueio local determinístico realizado antes do toque."
+            } else if (policy.suspicious) {
+                "Sinal de risco da operadora registrado; a ligação não foi bloqueada sem evidência suficiente."
+            } else {
+                "Ligação desconhecida permitida: a triagem silenciosa completa ainda não possui ponte de áudio suportada."
+            }
+        )
+        CallRepository.addAsync(applicationContext, record)
     }
 }

@@ -5,65 +5,205 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
-  group: android-ci-${{ github.ref }}
+  group: android-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
-    name: Test, lint and build APK
+    name: Test, lint and build Android artifacts
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
-      - name: Set up JDK
-        uses: actions/setup-java@v4
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Set up Android SDK 37 and NDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-37.0 build-tools;36.0.0 ndk;28.2.13676358'
+          log-accepted-android-sdk-licenses: false
 
-      - name: Install Android API 37
-        run: sdkmanager "platforms;android-37" "build-tools;36.0.0"
-
-      # AGP 9.3 requires Gradle 9.5.0 or newer. We intentionally install Gradle
-      # in CI instead of requiring developers to build the app locally.
       - name: Set up Gradle 9.5
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v5
         with:
           gradle-version: '9.5.0'
+
+      - name: Install PJSIP build prerequisites
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends swig
+
+      - name: Prepare PJSIP 2.17 Android bindings
+        env:
+          ANDROID_NDK_ROOT: ${{ env.ANDROID_HOME }}/ndk/28.2.13676358
+        run: bash scripts/prepare_pjsip_android.sh
 
       - name: Validate FunctionGemma seed dataset
         run: python3 training/validate_dataset.py
 
-      - name: Unit tests
-        run: gradle :app:testDebugUnitTest --stacktrace
+      - name: Unit tests — public, privileged and universal VoIP
+        run: >-
+          gradle --no-daemon
+          :app:testPublicDebugUnitTest
+          :app:testPrivilegedDebugUnitTest
+          :app:testVoipDebugUnitTest
+          --stacktrace
 
-      - name: Android lint
-        run: gradle :app:lintDebug --stacktrace
+      - name: Android lint — all distributions
+        run: >-
+          gradle --no-daemon
+          :app:lintPublicDebug
+          :app:lintPublicRelease
+          :app:lintPrivilegedDebug
+          :app:lintPrivilegedRelease
+          :app:lintVoipDebug
+          :app:lintVoipRelease
+          --stacktrace
 
-      - name: Build debug APK
-        run: gradle :app:assembleDebug --stacktrace
+      - name: Build public debug APK
+        run: gradle --no-daemon :app:assemblePublicDebug --stacktrace
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - name: Build public release APK and AAB
+        run: >-
+          gradle --no-daemon
+          :app:assemblePublicRelease
+          :app:bundlePublicRelease
+          --stacktrace
+
+      - name: Build privileged OEM release APK
+        run: gradle --no-daemon :app:assemblePrivilegedRelease --stacktrace
+
+      - name: Build universal VoIP debug/release APK and AAB
+        run: >-
+          gradle --no-daemon
+          :app:assembleVoipDebug
+          :app:assembleVoipRelease
+          :app:bundleVoipRelease
+          --stacktrace
+
+      - name: Prepare public release artifacts
+        env:
+          CALLGUARD_KEYSTORE_B64: ${{ secrets.CALLGUARD_KEYSTORE_B64 }}
+          CALLGUARD_KEY_ALIAS: ${{ secrets.CALLGUARD_KEY_ALIAS }}
+          CALLGUARD_KEYSTORE_PASSWORD: ${{ secrets.CALLGUARD_KEYSTORE_PASSWORD }}
+          CALLGUARD_KEY_PASSWORD: ${{ secrets.CALLGUARD_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-artifacts
+          APK="app/build/outputs/apk/public/release/app-public-release-unsigned.apk"
+          AAB="app/build/outputs/bundle/publicRelease/app-public-release.aab"
+          test -f "$APK" && test -f "$AAB"
+          if [[ -n "${CALLGUARD_KEYSTORE_B64:-}" && -n "${CALLGUARD_KEY_ALIAS:-}" && -n "${CALLGUARD_KEYSTORE_PASSWORD:-}" && -n "${CALLGUARD_KEY_PASSWORD:-}" ]]; then
+            KEYSTORE="$RUNNER_TEMP/callguard-release.jks"
+            printf '%s' "$CALLGUARD_KEYSTORE_B64" | base64 --decode > "$KEYSTORE"
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign --ks "$KEYSTORE" --ks-key-alias "$CALLGUARD_KEY_ALIAS" --ks-pass env:CALLGUARD_KEYSTORE_PASSWORD --key-pass env:CALLGUARD_KEY_PASSWORD --out release-artifacts/CallGuardAI-v0.1.0-release-signed.apk "$APK"
+            jarsigner -keystore "$KEYSTORE" -storepass "$CALLGUARD_KEYSTORE_PASSWORD" -keypass "$CALLGUARD_KEY_PASSWORD" -signedjar release-artifacts/CallGuardAI-v0.1.0-release-signed.aab "$AAB" "$CALLGUARD_KEY_ALIAS"
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose release-artifacts/CallGuardAI-v0.1.0-release-signed.apk
+            jarsigner -verify release-artifacts/CallGuardAI-v0.1.0-release-signed.aab
+            rm -f "$KEYSTORE"
+          else
+            cp "$APK" release-artifacts/CallGuardAI-v0.1.0-release-unsigned.apk
+            cp "$AAB" release-artifacts/CallGuardAI-v0.1.0-release-unsigned.aab
+          fi
+          (cd release-artifacts && sha256sum CallGuardAI-* > SHA256SUMS.txt)
+
+      - name: Prepare universal VoIP release artifacts
+        env:
+          CALLGUARD_KEYSTORE_B64: ${{ secrets.CALLGUARD_KEYSTORE_B64 }}
+          CALLGUARD_KEY_ALIAS: ${{ secrets.CALLGUARD_KEY_ALIAS }}
+          CALLGUARD_KEYSTORE_PASSWORD: ${{ secrets.CALLGUARD_KEYSTORE_PASSWORD }}
+          CALLGUARD_KEY_PASSWORD: ${{ secrets.CALLGUARD_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p voip-artifacts
+          APK="app/build/outputs/apk/voip/release/app-voip-release-unsigned.apk"
+          AAB="app/build/outputs/bundle/voipRelease/app-voip-release.aab"
+          test -f "$APK" && test -f "$AAB"
+          if [[ -n "${CALLGUARD_KEYSTORE_B64:-}" && -n "${CALLGUARD_KEY_ALIAS:-}" && -n "${CALLGUARD_KEYSTORE_PASSWORD:-}" && -n "${CALLGUARD_KEY_PASSWORD:-}" ]]; then
+            KEYSTORE="$RUNNER_TEMP/callguard-voip-release.jks"
+            printf '%s' "$CALLGUARD_KEYSTORE_B64" | base64 --decode > "$KEYSTORE"
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign --ks "$KEYSTORE" --ks-key-alias "$CALLGUARD_KEY_ALIAS" --ks-pass env:CALLGUARD_KEYSTORE_PASSWORD --key-pass env:CALLGUARD_KEY_PASSWORD --out voip-artifacts/CallGuardAI-v0.1.0-universal-voip-signed.apk "$APK"
+            jarsigner -keystore "$KEYSTORE" -storepass "$CALLGUARD_KEYSTORE_PASSWORD" -keypass "$CALLGUARD_KEY_PASSWORD" -signedjar voip-artifacts/CallGuardAI-v0.1.0-universal-voip-signed.aab "$AAB" "$CALLGUARD_KEY_ALIAS"
+            rm -f "$KEYSTORE"
+          else
+            cp "$APK" voip-artifacts/CallGuardAI-v0.1.0-universal-voip-unsigned.apk
+            cp "$AAB" voip-artifacts/CallGuardAI-v0.1.0-universal-voip-unsigned.aab
+          fi
+          cat > voip-artifacts/VOIP-NOTICE.txt <<'EOF'
+          Universal VoIP mode transports calls using PJSIP/PJSUA2 2.17.
+          PJSIP is distributed under GPL v2 or later, with a commercial alternative.
+          The exact upstream source is https://github.com/pjsip/pjproject tag 2.17.
+          This repository includes the reproducible Android build script used for it.
+          A commercial/proprietary CallGuard distribution must obtain an appropriate PJSIP license.
+          EOF
+          (cd voip-artifacts && sha256sum CallGuardAI-* > SHA256SUMS.txt)
+
+      - name: Prepare privileged OEM artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p privileged-artifacts
+          OEM_APK="app/build/outputs/apk/privileged/release/app-privileged-release-unsigned.apk"
+          test -f "$OEM_APK"
+          cp "$OEM_APK" privileged-artifacts/CallGuardAI-v0.1.0-privileged-oem-unsigned.apk
+          cat > privileged-artifacts/README.txt <<'EOF'
+          System/OEM-only build. CALL_AUDIO_INTERCEPTION must be granted by the platform/OEM.
+          Installing this APK normally does not grant PSTN audio access.
+          EOF
+          (cd privileged-artifacts && sha256sum CallGuardAI-* > SHA256SUMS.txt)
+
+      - name: Upload public debug APK
+        uses: actions/upload-artifact@v7
         with:
           name: CallGuardAI-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/public/debug/app-public-debug.apk
+          if-no-files-found: error
+
+      - name: Upload public release APK and AAB
+        uses: actions/upload-artifact@v7
+        with:
+          name: CallGuardAI-release
+          path: release-artifacts/
+          if-no-files-found: error
+
+      - name: Upload privileged OEM APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: CallGuardAI-privileged-oem
+          path: privileged-artifacts/
+          if-no-files-found: error
+
+      - name: Upload universal VoIP debug APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: CallGuardAI-universal-voip-debug
+          path: app/build/outputs/apk/voip/debug/app-voip-debug.apk
+          if-no-files-found: error
+
+      - name: Upload universal VoIP release APK and AAB
+        uses: actions/upload-artifact@v7
+        with:
+          name: CallGuardAI-universal-voip
+          path: voip-artifacts/
           if-no-files-found: error
 
       - name: Upload test and lint reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: CallGuardAI-reports
-          path: |
-            app/build/reports/tests/
-            app/build/reports/lint-results-debug.html
-            app/build/reports/lint-results-debug.xml
+          path: app/build/reports/
           if-no-files-found: ignore

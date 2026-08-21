@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "CallGuardAI"
 include(":app")
+include(":pjsua2")

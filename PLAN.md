@@ -1,173 +1,220 @@
-# CallGuard AI — plano técnico executável
+# CallGuard AI — plano técnico após revisão Crítico → Executor
 
-## Objetivo de produto
+## Objetivo
 
-Para números desconhecidos, o produto final deve manter o usuário sem interrupção enquanto um agente local pergunta quem está ligando e por quê. A IA classifica a intenção e somente uma chamada legítima deve chegar ao usuário.
+Experiência desejada para **números fora dos contatos**:
 
-Exemplo de experiência desejada:
+1. a chamada chega sem interromper o usuário;
+2. um agente de voz local pergunta nome e motivo;
+3. VAD/STT local produzem evidência e transcrição;
+4. FunctionGemma 270M propõe `allowCall`, `blockCall` ou `askForClarification`;
+5. o aplicativo valida a proposta por regras determinísticas;
+6. spam/robô/golpe confirmado é encerrado;
+7. chamada legítima é apresentada ao usuário com o motivo.
 
-1. número desconhecido chama;
-2. o aparelho do usuário não toca;
-3. uma voz local pergunta: “Olá. Diga seu nome e o motivo da ligação.”;
-4. STT local produz a transcrição;
-5. FunctionGemma escolhe uma ação estruturada;
-6. spam/robô/silêncio é encerrado;
-7. ligação legítima é apresentada ao usuário com nome/motivo.
+## Limite e oportunidade do Android público
 
-## Restrição de plataforma que muda a arquitetura
+Um APK comum com `CallScreeningService` consegue permitir, silenciar ou rejeitar uma chamada e deve responder em até 5 segundos. Ele **não recebe o áudio bidirecional PCM da chamada celular da operadora** e não possui uma segunda resposta para silenciar uma chamada e, depois, religar o toque da mesma chamada.
 
-`CallScreeningService` é ótimo para bloquear/silenciar/permitir, porém precisa responder em até 5 segundos e sua API pública não fornece um canal bidirecional de áudio da chamada da operadora para um APK comum. Além disso, não há um segundo `respondToCall` para silenciar uma chamada e depois fazê-la voltar a tocar.
+Além disso, sem `READ_CONTACTS`, o Android entrega ao screening justamente chamadas cujo número não está nos contatos — o comportamento desejado aqui. Chamadas com apresentação restrita/oculta/indisponível não são entregues ao `CallScreeningService`.
 
-Por isso o projeto separa dois produtos:
+No Android 17/API 37 existe uma nova rota pública para **Connections externas**: `Connection.setAudioProcessing(Call.AUDIO_PROCESSING_USE_CASE_CALL_SCREENING)` coloca a chamada em `STATE_AUDIO_PROCESSING`, e `setSimulatedRinging()` pode apresentá-la ao usuário depois. As duas operações exigem `PROPERTY_IS_EXTERNAL_CALL`; elas não tornam uma chamada SIM/PSTN comum externa nem fornecem PCM por si só.
 
-### MVP público Android
+Consequência: **APK público + chamada SIM convencional + conversa bidirecional da IA + 100% offline ainda não é implementável só com APIs públicas.** Porém, a parte de estado necessária à experiência final já pode ser usada por uma integração externa compatível no Android 17.
 
-- papel de `ROLE_CALL_SCREENING`;
-- bloqueio determinístico de spam já conhecido;
-- histórico persistente;
-- FunctionGemma 270M local;
-- laboratório para validar transcrições e decisões;
-- APK pequeno, modelo `.litertlm` instalado separadamente;
-- interface preparada para receber uma futura ponte de áudio.
+Rotas reais para o produto final:
 
-### Produto final de triagem silenciosa
+1. parceria OEM / app privilegiado / integração de ROM que exponha áudio da chamada SIM e possa entregar uma conexão compatível;
+2. provedor de chamada externa/companion compatível com o novo estado de Audio Processing do Android 17;
+3. rota VoIP/SIP controlada pelo app (permite áudio, mas a telefonia deixa de ser estritamente offline);
+4. futura ampliação da API pública para PSTN comum.
 
-Precisa de uma destas rotas de telefonia:
+## Estado atual do MVP público
 
-1. integração OEM/privilegiada com acesso ao áudio de chamada;
-2. caminho VoIP/SIP em que o áudio já pertence ao app;
-3. integração nativa com fabricante/ROM;
-4. outra API futura do Android que exponha o áudio de triagem.
+Implementado:
 
-Não será usado um “hack” de microfone/alto-falante como base do produto por ser frágil, incompatível entre aparelhos e inadequado para privacidade.
+- `ROLE_CALL_SCREENING`;
+- resposta conservadora dentro da janela do Android;
+- **nenhum número demo é usado como regra real**;
+- falha de verificação da operadora é sinal de risco, não prova de spam, e só é consultada no API 30+;
+- política pura `AudioProcessingEligibility` para separar API 37/chamada externa de PSTN comum;
+- `Android17AudioProcessingController` com `CALL_SCREENING → SIMULATED_RINGING → ACTIVE` e validação de ordem/eligibilidade;
+- histórico local cifrado com AES-GCM e chave Android Keystore;
+- sem permissão `INTERNET`, sem cloud backup e sem device-transfer dos dados privados;
+- exclusão explícita e destrutiva do histórico, ciphertext legado e chave AES;
+- FunctionGemma via LiteRT-LM, modelo fora do APK;
+- tool calling **manual**, permitindo validação antes de qualquer ação;
+- política determinística que valida categoria, confiança finita e cardinalidade;
+- modelo importado de forma atômica, com SHA-256 e estado de confiança;
+- SHA-256 recalculado do arquivo real antes de qualquer carregamento de produção;
+- nenhum hash marcado como confiável até existir uma release CallGuard avaliada;
+- laboratório de transcrição;
+- exemplos solicitados claramente marcados `DEMO`;
+- abstração de áudio que exige entrada PCM, saída PCM, conexão ao usuário e término da chamada;
+- GitHub Actions como único caminho de build/test/lint/debug/release.
 
-## Pipeline local de IA
+Até existir uma ponte de áudio, chamadas desconhecidas sem regra determinística são **permitidas**, não bloqueadas por suposição.
+
+## Estratégia híbrida aplicada
+
+A arquitetura agora trata duas capacidades separadamente:
 
 ```text
-Áudio disponível pela ponte
+CONTROLE TELECOM                         TRANSPORTE DE ÁUDIO
+
+PSTN comum                              CallScreeningService
+  └─ permitir/bloquear/silenciar          └─ sem PCM bidirecional público
+
+Android 17 + EXTERNAL_CALL              Provedor externo/OEM/VoIP
+  ├─ STATE_AUDIO_PROCESSING               ├─ PCM do chamador
+  ├─ CALL_SCREENING use case              └─ PCM para o chamador
+  └─ STATE_SIMULATED_RINGING
+```
+
+Quando uma integração futura fornecer `Connection` externa + PCM, o CallGuard não precisará reinventar o estado de telefonia: o controlador API 37 já implementa a transição pública correta. Para PSTN comum, o app continua conservador e não tenta APIs escondidas.
+
+## Pipeline offline planejado
+
+```text
+Ponte de áudio suportada
         ↓
-VAD local
+PCM 8/16 kHz
+        ↓
+VAD local ──── silêncio confirmado / turnos
         ↓
 STT local PT-BR
         ↓
-transcrição curta
+transcrição + evidências acústicas
         ↓
 FunctionGemma 270M fine-tuned
         ↓
-┌────────────────┬───────────────────┬──────────────────────┐
-│ allowCall      │ blockCall         │ askForClarification  │
-└────────────────┴───────────────────┴──────────────────────┘
+  tool call proposta
         ↓
-Política determinística do app
-        ↓
-Histórico + ação de telefonia
+validador determinístico
+   │       │        │
+allow   block     askAgain
+   ↓       ↓        ↓
+ponte de telefonia / novo turno
 ```
 
-O FunctionGemma nunca recebe autorização direta para executar APIs de telefonia. Ele apenas escolhe uma função de domínio. O aplicativo valida e executa a decisão.
+### VAD
 
-## Funções expostas ao modelo
+Candidato inicial: **Silero VAD**, modelo pequeno e permissivo. Silêncio deve ser inferido por VAD/temporização de áudio; **transcrição vazia nunca é prova de silêncio**.
 
-### `allowCall`
+### STT
 
-Parâmetros: nome declarado, categoria, resumo, confiança.
+Candidato inicial para benchmark: **whisper.cpp multilingual Base Q5_1 (~57 MB)**. Só será promovido após teste em áudio telefônico PT-BR, sotaques, ruído e aparelhos reais. Tiny pode ser comparado por velocidade, mas não será escolhido apenas por tamanho.
 
-Usos: pessoa real, entrega, emprego, saúde, serviço solicitado.
+### TTS
 
-### `blockCall`
+Primeiro caminho: `TextToSpeech` do Android usando somente uma `Voice` que declare `isNetworkConnectionRequired == false`, sintetizando para PCM/arquivo local. Se qualidade/disponibilidade forem insuficientes, escolher um modelo TTS embarcado após benchmark e revisão de licença.
 
-Parâmetros: categoria, motivo, confiança.
+## FunctionGemma e segurança de decisão
 
-Usos: telemarketing, oferta de operadora, robô, gravação automática, silêncio.
+O modelo **não executa telefonia**. Ele só propõe uma ferramenta.
 
-### `askForClarification`
+- `allowCall`: categorias `REAL_PERSON`, `DELIVERY`, `JOB`, `HEALTH`, `SERVICE`; confiança mínima do validador: 0,70.
+- `blockCall`: `OPERATOR`, `MARKETING`, `SCAM`, `ROBOT_OR_SILENT`; confiança mínima do validador: 0,90.
+- `askForClarification`: opção preferida em qualquer ambiguidade.
 
-Parâmetro: uma pergunta curta.
+Categoria incompatível, confiança ausente/baixa/não finita, ferramenta desconhecida ou múltiplas tool calls viram `PENDING`.
 
-Usado quando “quero falar sobre um assunto” não informa o suficiente. O estado entre turnos será mantido pelo aplicativo, não delegado implicitamente ao modelo.
+A confiança emitida pelo LLM não é tratada como probabilidade calibrada. Os limiares atuais são guardrails de desenvolvimento e deverão ser calibrados no conjunto de teste bloqueado. A decisão de telefonia final deverá combinar a classificação com evidências do VAD/STT e a política determinística da sessão, e não tratar a autoconfiança do LLM como probabilidade real.
 
-## Fine-tuning
+## Segurança contra conteúdo adversarial
 
-O modelo de 270M deve ser especializado em português brasileiro e telefonia. Dataset inicial inclui:
+A fala do chamador é entrada não confiável. O prompt instrui o modelo a ignorar comandos contidos na transcrição e o código restringe o efeito final por schema, allowlists de categoria, confiança e cardinalidade da tool call. O dataset contém casos de prompt injection e marketing/golpe disfarçados.
 
-- diferentes formas de dizer a mesma intenção;
-- erros típicos do STT;
-- gírias e linguagem informal;
-- chamadas legítimas parecidas com marketing;
-- marketing tentando parecer urgente;
-- entregadores e portaria;
-- retorno de emprego;
-- conhecidos com número novo;
-- robôs e chamadas sem fala;
-- casos ambíguos que exigem uma segunda pergunta.
+## Modelo e distribuição
 
-Meta antes de produção: conjunto de teste separado por falante/frase e análise específica de falso bloqueio. Falso bloqueio de chamadas legítimas deve receber custo muito maior que um spam que eventualmente passe.
+O APK não contém o FunctionGemma. Como o app não possui permissão de Internet, o arquivo `.litertlm` é obtido externamente e importado pelo seletor de arquivos.
 
-## Política de confiança
+A instalação:
 
-A confiança produzida pelo LLM não será tratada como probabilidade calibrada. A política de produção deve combinar:
+- exige extensão `.litertlm` quando o provedor informa nome;
+- limita tamanho esperado;
+- copia para arquivo temporário e sincroniza em disco;
+- preserva o modelo anterior até a troca terminar;
+- calcula SHA-256;
+- registra se o hash pertence à allowlist compilada.
 
-- tipo de função escolhida;
-- regras determinísticas;
-- repetição da classificação;
-- sinais do STT/VAD;
-- contexto local permitido pelo usuário;
-- testes de calibração no dataset real.
+O metadado salvo **não autoriza produção sozinho**. Antes de inicializar um modelo em modo de produção, o app recalcula o SHA-256 do arquivo exato que será executado e exige que ele corresponda à allowlist. Arquivo corrompido, substituído ou sem hash confiável resulta em `PENDING`.
 
-Quando houver dúvida, `askForClarification` é preferível a bloquear.
+A allowlist está vazia até produzirmos um modelo oficial. Uma release de produção deverá publicar manifesto com versão, hash, tamanho, runtime testado e métricas do conjunto `test_locked`.
+
+O fato de o modelo estar fora do APK não torna o runtime pequeno. O artifact debug universal do run #107 ficou em aproximadamente **107 MiB**, dominado pelo LiteRT-LM, DEX/dependências e bibliotecas nativas para duas ABIs. Esse valor é referência de desenvolvimento, não meta de release. A distribuição final deve usar App Bundle/ABI splits quando aplicável, avaliar R8/minificação com regras compatíveis com o runtime e medir tamanho real por arquitetura antes de qualquer promessa pública.
+
+## Dataset e gates de produção
+
+O seed é somente desenvolvimento. O fine-tuning sério deve ter `train`, `validation`, `test_locked`, `red_team` e, se houver consentimento, `real_opt_in`.
+
+Antes de ativar bloqueio por IA:
+
+- falso bloqueio de chamadas legítimas <= 0,5%;
+- 100% das ações executadas passam pelo schema/política do app;
+- 0 bloqueios por ausência de texto sem evidência acústica;
+- >= 99,5% dos casos red-team sem decisão terminal incoerente;
+- matriz de confusão por categoria e por tipo de erro de STT;
+- regressão após mudança de modelo, prompt, quantização ou LiteRT-LM.
 
 ## Privacidade
 
-Após o modelo e modelos de voz serem instalados:
-
+- aplicativo sem `INTERNET`;
 - inferência local;
-- nenhuma transcrição enviada à nuvem;
-- histórico armazenado no aparelho;
-- retenção configurável numa etapa futura;
-- dados reais para fine-tuning somente com consentimento explícito e anonimização.
+- histórico cifrado por AES-GCM com chave no Android Keystore;
+- backup Android e transferência automática de dados privados desativados;
+- usuário pode apagar o ciphertext e a chave do histórico;
+- dados reais para treino somente com opt-in e anonimização;
+- transcrições não entram em logs/telemetria de rede.
 
 ## Fases
 
-### Fase 1 — executada neste MVP
+### Fase 1 — base Android / IA de laboratório
 
-- [x] app Compose;
-- [x] tela com “Ligações do dia” e os 3 exemplos solicitados;
-- [x] tela “Ligações reais” com Roberto;
-- [x] `ROLE_CALL_SCREENING`;
-- [x] política rápida separada do LLM;
-- [x] histórico persistente;
-- [x] importação de `.litertlm` separado do APK;
-- [x] SHA-256 do modelo importado;
-- [x] FunctionGemma com ferramentas estruturadas;
-- [x] fallback CPU quando GPU não inicializa;
-- [x] laboratório de transcrições dentro do app;
-- [x] abstração para a futura ponte de áudio;
-- [x] CI para testes, lint e APK;
-- [x] política de projeto: nenhuma compilação local, build somente no GitHub Actions;
-- [x] carregamento/instalação do modelo fora da thread principal;
-- [x] falha de verificação da operadora tratada como risco, não como bloqueio automático.
+- [x] UI Compose e exemplos solicitados com selo DEMO;
+- [x] screening role e serviço;
+- [x] política de screening conservadora;
+- [x] histórico cifrado e exclusão destrutiva;
+- [x] importação atômica de `.litertlm`, SHA-256 e revalidação de integridade em produção;
+- [x] FunctionGemma com tool calling manual;
+- [x] guardrails determinísticos e testes unitários;
+- [x] fallback GPU → CPU;
+- [x] dataset seed adversarial e gates de avaliação;
+- [x] fronteira explícita de áudio;
+- [x] build debug e release/AAB no GitHub Actions.
 
-### Fase 2 — próxima
+### Fase 2 — modelos de voz, ainda fora de chamada real
 
-- [ ] escolher STT local após benchmark real em PT-BR telefônico;
-- [ ] VAD local;
-- [ ] TTS local;
-- [ ] criar dataset de milhares de exemplos;
+- [ ] integrar/benchmarkar Silero VAD;
+- [ ] integrar/benchmarkar Whisper Base Q5_1 e alternativas;
+- [ ] validar TTS offline Android e fallback local;
+- [ ] coletar corpus telefônico consentido/anonimizado ou corpus público adequado;
+- [ ] criar milhares de exemplos de tool calling;
 - [ ] fine-tune FunctionGemma;
-- [ ] converter/quantizar para `.litertlm`;
-- [ ] medir latência, RAM, temperatura e bateria em celulares de entrada/intermediários.
+- [ ] converter/quantizar `.litertlm`;
+- [ ] produzir primeiro manifesto/hash confiável;
+- [ ] medir latência, RAM, temperatura e bateria em várias classes de aparelho.
 
-### Fase 3 — desbloqueadora do produto final
+### Fase 3 — integração de telefonia
 
-- [ ] prototipar uma rota de áudio real (OEM/privilegiada ou VoIP/SIP);
-- [ ] provar que a chamada pode permanecer silenciosa durante a conversa;
-- [ ] provar que uma chamada aprovada consegue ser entregue/acionar o usuário;
-- [ ] só então integrar STT/TTS ao caminho de chamada real.
+- [x] implementar controle Android 17 `AUDIO_PROCESSING/CALL_SCREENING/SIMULATED_RINGING` para `PROPERTY_IS_EXTERNAL_CALL`;
+- [ ] escolher/obter uma rota real de PCM para chamadas SIM (OEM/privilegiada) ou provedor externo compatível;
+- [ ] provar PCM bidirecional estável;
+- [ ] provar que o chamador pode conversar enquanto o usuário não é interrompido;
+- [ ] conectar a aprovação da IA a `setSimulatedRinging()`/handoff do provedor;
+- [ ] integrar VAD/STT/TTS/FunctionGemma à sessão real;
+- [ ] testar chamadas de emergência, espera, queda de app, troca de rede e Bluetooth.
 
-### Fase 4 — produção
+### Fase 4 — release
 
-- [ ] telemetria local de qualidade opt-in;
-- [ ] atualização assinada do modelo;
-- [ ] proteção contra modelo corrompido;
-- [ ] testes de regressão de falso bloqueio;
-- [ ] configuração do usuário: sempre permitir/bloquear categorias;
-- [ ] política para emergência e números recorrentes.
+- [ ] conjunto `test_locked` congelado e relatório público/interno de métricas;
+- [ ] modelo confiável na allowlist;
+- [ ] testes instrumentados e matriz de dispositivos;
+- [ ] política de retenção configurável;
+- [ ] regras do usuário: sempre permitir/bloquear;
+- [ ] gerar App Bundle/ABI splits e medir download/instalação por arquitetura;
+- [ ] validar R8/minificação com LiteRT-LM e comparar tamanho/latência antes e depois;
+- [ ] definir meta de tamanho somente após medição do pacote otimizado;
+- [ ] configurar keystore de produção para releases assinadas;
+- [ ] revisão de LGPD, consentimento de gravação/transcrição e requisitos da Play Store/distribuição escolhida;
+- [ ] política de rollback de app e modelo.
