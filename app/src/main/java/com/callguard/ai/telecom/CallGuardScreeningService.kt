@@ -1,5 +1,6 @@
 package com.callguard.ai.telecom
 
+import android.os.Build
 import android.telecom.Call
 import android.telecom.CallScreeningService
 import android.telecom.Connection
@@ -19,9 +20,16 @@ class CallGuardScreeningService : CallScreeningService() {
         if (callDetails.callDirection != Call.Details.DIRECTION_INCOMING) return
 
         val number = callDetails.handle?.schemeSpecificPart.orEmpty()
+        val verificationFailed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            callDetails.callerNumberVerificationStatus == Connection.VERIFICATION_STATUS_FAILED
+        } else {
+            // Caller-number verification status was added in API 30. Android 10
+            // callers are treated as having no verification signal, never as spam.
+            false
+        }
         val policy = FastScreeningPolicy.evaluate(
             number = number,
-            verificationFailed = callDetails.callerNumberVerificationStatus == Connection.VERIFICATION_STATUS_FAILED
+            verificationFailed = verificationFailed
         )
 
         val response = CallResponse.Builder()
