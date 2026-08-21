@@ -85,3 +85,21 @@ echo "PJSUA2 prepared: $COUNT_JAVA Java bindings, $COUNT_SO PJSUA2 ABIs, $COUNT_
 test "$COUNT_JAVA" -gt 100
 test "$COUNT_SO" -eq 3
 test "$COUNT_CXX" -eq 3
+
+# Keep a small, explicit compatibility probe next to the generated bindings.
+# This makes CI logs show the exact Java/SWIG surface that the Kotlin VoIP
+# layer compiles against, and catches upstream binding drift early.
+AUD_DEV_MANAGER="$OUT_DIR/java/org/pjsip/pjsua2/AudDevManager.java"
+ACCOUNT_CLASS="$OUT_DIR/java/org/pjsip/pjsua2/Account.java"
+CALL_CLASS="$OUT_DIR/java/org/pjsip/pjsua2/Call.java"
+ENDPOINT_CLASS="$OUT_DIR/java/org/pjsip/pjsua2/Endpoint.java"
+
+for API_FILE in "$AUD_DEV_MANAGER" "$ACCOUNT_CLASS" "$CALL_CLASS" "$ENDPOINT_CLASS"; do
+  test -f "$API_FILE"
+done
+
+echo "==> PJSUA2 Java compatibility surface"
+grep -nE 'setCaptureDev|setPlaybackDev|getCaptureDevMedia|getPlaybackDevMedia|captureDevMedia|playbackDevMedia|setNullDev|enumDev2' "$AUD_DEV_MANAGER" || true
+grep -nE 'shutdown2|shutdown\(|delete\(' "$ACCOUNT_CLASS" || true
+grep -nE 'getAudioMedia|hangup\(|answer\(|delete\(' "$CALL_CLASS" || true
+grep -nE 'libDestroy|hangupAllCalls|delete\(' "$ENDPOINT_CLASS" || true
