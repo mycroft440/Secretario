@@ -299,7 +299,7 @@ private fun StatusCard(
             )
             Text(
                 when {
-                    modelInfo == null -> "Modelo local ainda não instalado • APK permanece leve"
+                    modelInfo == null -> "Modelo de IA ainda não instalado • importação separada do app"
                     modelInfo.trusted -> "Modelo CallGuard verificado instalado"
                     else -> "Modelo local instalado • NÃO VERIFICADO"
                 },
