@@ -61,6 +61,14 @@ Arquivo local esperado:
 
 O APK não possui Internet. O modelo é obtido externamente e importado pelo seletor de arquivos. A instalação preserva o modelo anterior até concluir, calcula SHA-256 e registra o estado de confiança. Antes de qualquer inicialização de **produção**, o app recalcula o SHA-256 do arquivo que será executado e exige correspondência com a allowlist compilada. A allowlist atual está vazia porque ainda não existe um fine-tune oficial aprovado.
 
+## Tamanho do pacote
+
+O modelo FunctionGemma fica fora do APK, mas isso **não significa que o APK seja pequeno**: o runtime LiteRT-LM e suas bibliotecas nativas têm custo relevante. O artifact debug universal do run #107 ficou em aproximadamente **107 MiB**.
+
+A inspeção desse artifact mostrou aproximadamente **45 MiB** em bibliotecas nativas para `arm64-v8a` + `x86_64` e cerca de **61 MiB** em DEX/dependências. Esses números são de um APK debug universal e não representam ainda um pacote final otimizado.
+
+Antes de release, o tamanho deverá ser medido novamente usando **Android App Bundle/ABI splits**, shrink/minificação com **R8** quando compatível com o LiteRT-LM e medição do download/instalação por arquitetura. O projeto não promete um tamanho final até essa medição existir.
+
 ## Build — somente GitHub Actions
 
 **Não compilar localmente.**
