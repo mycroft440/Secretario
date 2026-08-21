@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -30,6 +31,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -80,19 +82,26 @@ private fun Dashboard() {
     val coordinator = remember { TriageCoordinator(context) }
     DisposableEffect(Unit) { onDispose { coordinator.close() } }
 
-    var modelInstalled by remember { mutableStateOf(FunctionGemmaTriageEngine(context).isModelInstalled) }
+    fun modelExists(): Boolean {
+        val file = FunctionGemmaTriageEngine(context).modelFile
+        return file.exists() && file.length() > 1_000_000L
+    }
+
+    var modelInstalled by remember { mutableStateOf(modelExists()) }
     var modelMessage by remember { mutableStateOf<String?>(null) }
     var demoNumber by remember { mutableStateOf("11999999999") }
     var demoTranscript by remember { mutableStateOf("preciso falar com você troquei de número sou roberto") }
     var demoResult by remember { mutableStateOf<String?>(null) }
     var classifying by remember { mutableStateOf(false) }
+    var confirmClearHistory by remember { mutableStateOf(false) }
 
     val modelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             modelMessage = "Instalando IA local…"
             scope.launch {
+                coordinator.unloadModel()
                 val result = ModelInstaller.installFromUri(context, uri)
-                modelInstalled = result.isSuccess
+                modelInstalled = modelExists()
                 modelMessage = result.fold(
                     onSuccess = { "IA instalada • %.1f MB • SHA-256 %s…".format(it.bytes / 1_048_576.0, it.sha256.take(10)) },
                     onFailure = { "Falha ao instalar IA: ${it.message}" }
@@ -115,6 +124,23 @@ private fun Dashboard() {
         Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate() == today
     }
     val realCalls = dayCalls.filter { it.decision == CallDecision.ALLOWED && !it.transcript.isNullOrBlank() }
+
+    if (confirmClearHistory) {
+        AlertDialog(
+            onDismissRequest = { confirmClearHistory = false },
+            title = { Text("Apagar histórico?") },
+            text = { Text("Números, transcrições e decisões salvas neste aparelho serão removidos. Essa ação não pode ser desfeita.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    CallRepository.clearHistory()
+                    confirmClearHistory = false
+                }) { Text("Apagar") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClearHistory = false }) { Text("Cancelar") }
+            }
+        )
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
@@ -147,9 +173,7 @@ private fun Dashboard() {
             )
         }
 
-        item {
-            LimitationCard()
-        }
+        item { LimitationCard() }
 
         item { SectionHeader("Ligações do dia", dayCalls.size) }
         items(dayCalls, key = { it.id }) { call -> CallRow(call) }
@@ -169,6 +193,15 @@ private fun Dashboard() {
                     Spacer(Modifier.height(6.dp))
                     Text("disse: ${call.transcript}", color = Color(0xFF344054), lineHeight = 21.sp)
                 }
+            }
+        }
+
+        item {
+            OutlinedButton(
+                onClick = { confirmClearHistory = true },
+                enabled = calls.isNotEmpty()
+            ) {
+                Text("Apagar histórico local")
             }
         }
 
@@ -291,7 +324,7 @@ private fun LimitationCard() {
         Column(Modifier.padding(14.dp)) {
             Text("Estado do MVP", fontWeight = FontWeight.Bold, color = Color(0xFF9A3412))
             Text(
-                "A IA, histórico e bloqueio rápido estão separados e funcionais. A triagem silenciosa completa ainda depende de uma ponte que entregue o áudio bidirecional da chamada da operadora; a API pública de CallScreeningService não oferece esse canal.",
+                "A IA, o histórico e o filtro Android estão estruturados. A triagem silenciosa completa ainda depende de uma ponte que entregue o áudio bidirecional da chamada da operadora; a API pública de CallScreeningService não oferece esse canal.",
                 color = Color(0xFF9A3412),
                 fontSize = 13.sp,
                 modifier = Modifier.padding(top = 4.dp)
