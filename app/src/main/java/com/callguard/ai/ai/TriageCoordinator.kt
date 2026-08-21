@@ -6,6 +6,10 @@ import com.callguard.ai.data.CallRecord
 import com.callguard.ai.data.CallRepository
 import com.callguard.ai.data.TriageResult
 
+/**
+ * Coordinator used by the in-app laboratory. It deliberately permits unverified
+ * imported models; production call routing must use classifyForProduction().
+ */
 class TriageCoordinator(context: Context) : AutoCloseable {
     private val engine = FunctionGemmaTriageEngine(context.applicationContext)
 
@@ -18,7 +22,7 @@ class TriageCoordinator(context: Context) : AutoCloseable {
     ): TriageResult {
         val normalizedNumber = phoneNumber.trim().take(40).ifBlank { "Número desconhecido" }
         val normalizedTranscript = transcript.trim().take(1_500)
-        val result = engine.classify(normalizedTranscript)
+        val result = engine.classifyForLab(normalizedTranscript)
         val label = when (result.decision) {
             CallDecision.ALLOWED -> result.callerName?.let { "ligação real • $it" } ?: result.category.displayName()
             CallDecision.BLOCKED -> result.category.displayName()
@@ -34,7 +38,8 @@ class TriageCoordinator(context: Context) : AutoCloseable {
                 transcript = normalizedTranscript.ifBlank { null },
                 summary = result.summary,
                 callerName = result.callerName,
-                confidence = result.confidence
+                confidence = result.confidence,
+                isDemo = true
             )
         )
         return result
