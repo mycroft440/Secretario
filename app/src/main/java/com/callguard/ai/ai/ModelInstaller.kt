@@ -81,6 +81,10 @@ object ModelInstaller {
             }
         }
 
+    /**
+     * Fast metadata lookup for the UI/lab. It deliberately does not re-hash a large
+     * model on the main thread. Production loading must use verifiedTrustedMetadata().
+     */
     fun installedMetadata(context: Context): InstalledModelInfo? {
         val file = File(context.filesDir, "models/${FunctionGemmaTriageEngine.MODEL_FILE}")
         if (!file.exists() || file.length() !in MIN_MODEL_BYTES..MAX_MODEL_BYTES) return null
@@ -100,6 +104,25 @@ object ModelInstaller {
             trusted = storedTrusted && ModelTrust.isTrusted(sha)
         )
     }
+
+    /**
+     * Production trust check. Recomputes SHA-256 from the exact file that will be
+     * executed, so stale metadata cannot authorize a replaced or corrupted model.
+     */
+    suspend fun verifiedTrustedMetadata(context: Context): InstalledModelInfo? =
+        withContext(Dispatchers.IO) {
+            val metadata = installedMetadata(context) ?: return@withContext null
+            if (metadata.sha256 == "desconhecido") return@withContext null
+            val actualSha256 = runCatching { sha256(metadata.file) }.getOrNull()
+                ?: return@withContext null
+            if (!actualSha256.equals(metadata.sha256, ignoreCase = true)) return@withContext null
+            if (!ModelTrust.isTrusted(actualSha256)) return@withContext null
+            metadata.copy(
+                bytes = metadata.file.length(),
+                sha256 = actualSha256,
+                trusted = true
+            )
+        }
 
     suspend fun remove(context: Context): Boolean = withContext(Dispatchers.IO) {
         val dir = File(context.filesDir, "models")
