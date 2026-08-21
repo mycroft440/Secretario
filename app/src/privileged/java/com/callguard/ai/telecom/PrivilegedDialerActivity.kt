@@ -10,6 +10,7 @@ import android.telecom.Call
 import android.telecom.TelecomManager
 import android.telecom.VideoProfile
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -52,7 +53,7 @@ class PrivilegedDialerActivity : ComponentActivity() {
 
 @Composable
 private fun PrivilegedDialerScreen() {
-    val activity = androidx.compose.ui.platform.LocalContext.current as PrivilegedDialerActivity
+    val activity = LocalActivity.current as? PrivilegedDialerActivity ?: return
     val roleManager = remember { activity.getSystemService(RoleManager::class.java) }
     val telecomManager = remember { activity.getSystemService(TelecomManager::class.java) }
     val calls by PrivilegedCallRegistry.calls.collectAsState()
