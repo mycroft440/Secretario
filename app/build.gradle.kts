@@ -22,6 +22,7 @@ android {
         create("public") {
             dimension = "distribution"
             buildConfigField("boolean", "PRIVILEGED_PSTN_AUDIO", "false")
+            buildConfigField("boolean", "UNIVERSAL_VOIP", "false")
         }
         create("privileged") {
             dimension = "distribution"
@@ -29,6 +30,16 @@ android {
             applicationIdSuffix = ".privileged"
             versionNameSuffix = "-privileged"
             buildConfigField("boolean", "PRIVILEGED_PSTN_AUDIO", "true")
+            buildConfigField("boolean", "UNIVERSAL_VOIP", "false")
+        }
+        create("voip") {
+            dimension = "distribution"
+            // Android 10+ universal route: the phone number must arrive by SIP/VoIP
+            // (direct DID, number porting, or carrier forwarding to the SIP provider).
+            applicationIdSuffix = ".voip"
+            versionNameSuffix = "-voip"
+            buildConfigField("boolean", "PRIVILEGED_PSTN_AUDIO", "false")
+            buildConfigField("boolean", "UNIVERSAL_VOIP", "true")
         }
     }
 
@@ -69,4 +80,13 @@ dependencies {
     // Keep this pinned for reproducible builds; upgrades are validated by CI before merge.
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.16.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
+
+    // PJSIP/PJSUA2 is generated from the official 2.17 source by GitHub Actions.
+    // The VoIP flavor is the only distribution linked to it.
+    "voipImplementation"(project(":pjsua2"))
+
+    // Offline mobile PT-BR STT bootstrap. The small Portuguese model is installed
+    // separately (~31 MB); it is not embedded in the APK.
+    "voipImplementation"("com.alphacephei:vosk-android:0.3.47@aar")
+    "voipImplementation"("net.java.dev.jna:jna:5.18.1@aar")
 }
