@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  EXAMPLE ONLY.
+  The OEM/ROM integrator must adapt this to the device's signing, partition,
+  Android version and permission policy. Installing this file by itself is not
+  sufficient to bypass hidden/System API restrictions.
+-->
+<permissions>
+    <privapp-permissions package="com.callguard.ai.privileged">
+        <permission name="android.permission.CALL_AUDIO_INTERCEPTION" />
+    </privapp-permissions>
+</permissions>
