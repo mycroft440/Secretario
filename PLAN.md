@@ -158,7 +158,7 @@ Antes de ativar bloqueio por IA:
 - [x] fallback GPU → CPU;
 - [x] dataset seed adversarial e gates de avaliação;
 - [x] fronteira explícita de áudio;
-- [ ] GitHub Actions verde para o commit final da branch revisada.
+- [x] GitHub Actions verde no run #115 para o commit com a última correção funcional/copy.
 
 ### Fase 2 — modelos de voz, ainda fora de chamada real
 
