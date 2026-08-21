@@ -4,9 +4,13 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.KeyStore
@@ -24,10 +28,25 @@ object CallRepository {
     private const val MAX_HISTORY = 250
     private const val GCM_TAG_BITS = 128
 
-    private var appContext: Context? = null
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @Volatile private var appContext: Context? = null
     private val _calls = MutableStateFlow<List<CallRecord>>(emptyList())
     val calls: StateFlow<List<CallRecord>> = _calls.asStateFlow()
 
+    fun initializeAsync(context: Context) {
+        val applicationContext = context.applicationContext
+        ioScope.launch { initialize(applicationContext) }
+    }
+
+    fun addAsync(context: Context, record: CallRecord) {
+        val applicationContext = context.applicationContext
+        ioScope.launch {
+            initialize(applicationContext)
+            add(record)
+        }
+    }
+
+    @Synchronized
     fun initialize(context: Context) {
         if (appContext != null) return
         appContext = context.applicationContext
